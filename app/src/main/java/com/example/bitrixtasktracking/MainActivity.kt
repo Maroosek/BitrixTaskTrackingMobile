@@ -1,5 +1,6 @@
 package com.example.bitrixtasktracking
 
+import android.app.Application
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -23,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bitrixtasktracking.network.RetrofitClient
 import com.example.bitrixtasktracking.ui.theme.BitrixTaskTrackingTheme
@@ -32,20 +34,27 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.google.gson.annotations.SerializedName
 
 // Reprezentuje pojedyncze zadanie z Bitrixa
 data class BitrixResponse(
-    val result: BitrixResult
+    @SerializedName("result") val result: BitrixResult
 )
 
 data class BitrixResult(
-    val tasks: List<BitrixTask>
+    @SerializedName("tasks") val tasks: List<BitrixTask>
 )
 
 data class BitrixTask(
-    val id: String,
-    val title: String,
-    val status: String
+    @SerializedName("id") val id: String?,
+    @SerializedName("title") val title: String?,
+    @SerializedName("status") val status: String?, // Bitrix często zwraca status jako cyfrę (np. "3")
+    @SerializedName("realStatus") val realStatus: String?,
+    @SerializedName("timeSpentInLogs") val timeSpent: String?,
+    @SerializedName("deadline") val deadline: String?,
+    @SerializedName("activityDate") val activity: String?,
+    @SerializedName("createdDate") val createdAt: String?,
+    @SerializedName("responsibleId") val responsible: String?,
 )
 
 class MainActivity : ComponentActivity() {
@@ -114,7 +123,7 @@ fun MainScreen(viewModel: BitrixViewModel, modifier: Modifier = Modifier) {
     }
 }
 
-class BitrixViewModel : ViewModel() {
+class BitrixViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isFetching = MutableStateFlow(false)
     val isFetching: StateFlow<Boolean> = _isFetching.asStateFlow()
@@ -129,6 +138,21 @@ class BitrixViewModel : ViewModel() {
     val currentMode: StateFlow<String> = _currentMode.asStateFlow()
 
     var currentFilter = "Wszystkie"
+
+    private val cacheManager = JsonUtil(application)
+
+    init {
+        checkJson()
+    }
+
+    fun checkJson(){
+        val cachedData = cacheManager.readJson()
+        if (cachedData != null && _tasksText.value.isEmpty()) {
+            _statusText.value = "Wyświetlam dane z pamięci podręcznej..."
+            _tasksText.value = cachedData
+        }
+    }
+
 
     fun toggleMode() {
         _currentMode.value = if (_currentMode.value == "tasks") "groups" else "tasks"
@@ -155,7 +179,7 @@ class BitrixViewModel : ViewModel() {
         if (currentFilter == "W trakcie") {
             fetchInProgressTasks(isAuto)
         } else {
-            fetchStandardTasks(isAuto)
+            fetchStandardTasksRaw(isAuto)
         }
     }
 
@@ -167,17 +191,73 @@ class BitrixViewModel : ViewModel() {
 
     private suspend fun fetchStandardTasks(isAuto: Boolean) {
         try {
+            // 1. Pobieramy WSZYSTKIE zadania. Retrofit sam zamienia JSON na obiekty.
             val response = RetrofitClient.api.getTasks()
+            val allTasks = response.result.tasks
+
+            // 2. Filtrujemy po pobraniu (w pamięci telefonu)
+            val filteredTasks = if (currentFilter == "W trakcie") {
+                // W Bitrixie status "W trakcie" (In Progress) to często ID "3", ale możesz dostosować warunek
+                allTasks.filter { task ->
+                    task.status == "3" || task.realStatus == "3" || task.status == "W trakcie"
+                }
+            } else {
+                allTasks // Zwracamy wszystko, jeśli filtr jest inny
+            }
+
+            // 3. Budujemy tekst do wyświetlenia na ekranie dla celów testowych
+            val stringBuilder = StringBuilder()
+            stringBuilder.append("Pobrano: ${allTasks.size} | Po filtrze: ${filteredTasks.size}\n\n")
+
+            filteredTasks.forEach { task ->
+                stringBuilder.append("ID: ${task.id} | ${task.title}\n")
+                stringBuilder.append("Status: ${task.status} | Deadline: ${task.deadline}\n")
+                stringBuilder.append("Czas: ${task.timeSpent}\n")
+                stringBuilder.append("aktywnosc: ${task.activity}")
+                stringBuilder.append("----------------------------\n")
+            }
+
+            _statusText.value = "Pobrano i przefiltrowano!"
+            _tasksText.value = stringBuilder.toString()
+
+        } catch (e: Exception) {
+            _statusText.value = "Błąd pobierania"
+            _tasksText.value = "Wyjątek: ${e.javaClass.simpleName}\nTreść: ${e.message}"
+        } finally {
+            _isFetching.value = false
+        }
+    }
+
+    private suspend fun fetchStandardTasksRaw(isAuto: Boolean) {
+        try {
+            // Najpierw próbujemy pokazać dane z cache, żeby użytkownik nie czekał
+            val cachedData = cacheManager.readJson()
+            if (cachedData != null && _tasksText.value.isEmpty()) {
+                _statusText.value = "Wyświetlam dane z pamięci podręcznej..."
+                _tasksText.value = cachedData
+            }
+
+            // Pobieramy świeże dane z webhooka
+            _statusText.value = "Pobieranie świeżych danych..."
+            val response = RetrofitClient.api.getTasksRaw()
             val json = response.string()
 
-            _statusText.value = "Pobrano dane!"
-            // POPRAWIONO: Kod poprawnie zapisuje JSON w stanie aplikacji
+            // Zapisujemy nowy JSON do pliku (nadpisujemy stary)
+            cacheManager.saveJson(json)
+
+            _statusText.value = "Pobrano i zapisano dane!"
             _tasksText.value = json
 
         } catch (e: Exception) {
-            _statusText.value = "Błąd komunikacji z Bitrixem"
-            // POPRAWIONO: Zamiast "Aaa" wyświetli się konkretna przyczyna błędu
-            _tasksText.value = "Wyjątek: ${e.javaClass.simpleName}\nTreść: ${e.message}"
+            // Jeśli nie ma internetu, a mamy cache, poinformuj o tym
+            val cachedData = cacheManager.readJson()
+            if (cachedData != null) {
+                _statusText.value = "Brak sieci. Pokazuję ostatnio zapisane dane."
+                _tasksText.value = cachedData
+            } else {
+                _statusText.value = "Błąd komunikacji z Bitrixem i brak danych w cache."
+                _tasksText.value = "Wyjątek: ${e.javaClass.simpleName}\nTreść: ${e.message}"
+            }
         } finally {
             _isFetching.value = false
         }
