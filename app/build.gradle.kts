@@ -40,13 +40,13 @@ android {
 }
 
 dependencies {
-    implementation("com.squareup.retrofit2:retrofit:2.9.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+    implementation("com.squareup.retrofit2:retrofit:2.9.0") //update later to 3.0.0
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0") //update later to 3.0.0
 
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0") //update later to 5.3.2
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0") //update later to 5.3.2
 
-
+    implementation("androidx.navigation:navigation-compose:2.7.7") //update later to 2.9.7
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

@@ -45,12 +45,28 @@ import com.google.gson.Gson
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import com.google.gson.reflect.TypeToken
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
+import androidx.navigation.NavController
+
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.LaunchedEffect
+
 
 // Reprezentuje pojedyncze zadanie z Bitrixa
 data class BitrixResponse(
@@ -60,6 +76,14 @@ data class BitrixResponse(
 
 data class BitrixResult(
     @SerializedName("tasks") val tasks: List<BitrixTask>
+)
+
+data class SingleTaskResponse(
+    @SerializedName("result") val result: SingleTaskResult
+)
+
+data class SingleTaskResult(
+    @SerializedName("task") val task: BitrixTask
 )
 
 data class BitrixTask(
@@ -72,6 +96,8 @@ data class BitrixTask(
     @SerializedName("activityDate") val activity: String?,
     @SerializedName("createdDate") val createdAt: String?,
     @SerializedName("responsibleId") val responsible: String?,
+    @SerializedName("chatId") val chatId: String?,
+    @SerializedName("CHAT_ID") val chatIdAlt: String?
 )
 
 class MainActivity : ComponentActivity() {
@@ -83,11 +109,37 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             BitrixTaskTrackingTheme {
+                // DODANO: Kontroler nawigacji
+                val navController = rememberNavController()
+
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    MainScreen(
-                        viewModel = viewModel,
+
+                    // DODANO: NavHost zarządza tym, który ekran jest obecnie wyświetlany
+                    NavHost(
+                        navController = navController,
+                        startDestination = "taskList",
                         modifier = Modifier.padding(innerPadding)
-                    )
+                    ) {
+                        // Ekran 1: Główna lista
+                        composable("taskList") {
+                            MainScreen(
+                                viewModel = viewModel,
+                                navController = navController // Przekazujemy kontroler w dół
+                            )
+                        }
+
+                        // Ekran 2: Szczegóły zadania (z dynamicznym parametrem {taskId})
+                        composable(
+                            route = "taskDetail/{taskId}",
+                            arguments = listOf(navArgument("taskId") { type = NavType.StringType })
+                        ) { backStackEntry ->
+                            // Wyciągamy przekazane ID z argumentów
+                            val taskId = backStackEntry.arguments?.getString("taskId") ?: "Brak ID"
+
+                            // Wywołujemy nowy ekran
+                            TaskDetailScreen(taskId = taskId, navController = navController, viewModel = viewModel)
+                        }
+                    }
                 }
             }
         }
@@ -95,7 +147,11 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen(viewModel: BitrixViewModel, modifier: Modifier = Modifier) {
+fun MainScreen(
+    viewModel: BitrixViewModel,
+    navController: NavController,
+    modifier: Modifier = Modifier
+) {
     val isFetching by viewModel.isFetching.collectAsState()
     val statusText by viewModel.statusText.collectAsState()
     val tasksText by viewModel.tasksText.collectAsState()
@@ -112,7 +168,6 @@ fun MainScreen(viewModel: BitrixViewModel, modifier: Modifier = Modifier) {
         modifier = modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Górny panel z przyciskami (żeby zachować porządek, dodajemy mu padding)
         Column(
             modifier = Modifier.padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -160,10 +215,11 @@ fun MainScreen(viewModel: BitrixViewModel, modifier: Modifier = Modifier) {
             ) {
                 items(tasksList) { task ->
                     TaskCard(task = task, onClick = {
-                        // Tutaj na razie wywołujemy prostą akcję w konsoli.
-                        // Docelowo tu będzie kod otwierający nowy ekran!
-                        println("Kliknięto zadanie o ID: ${task.id}")
-                        viewModel._statusText.value = "Kliknięto: ${task.title}"
+                        if (task.id != null) {
+                            navController.navigate("taskDetail/${task.id}")
+                        } else {
+                            viewModel._statusText.value = "To zadanie nie ma ID!"
+                        }
                     })
                 }
             }
@@ -190,7 +246,82 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
     }
 }
 
+@Composable
+fun TaskDetailScreen(
+    taskId: String,
+    navController: NavController,
+    viewModel: BitrixViewModel // Musisz podać viewModel w wywołaniu z NavHost!
+) {
+    // To wywoła się tylko raz, gdy ekran zostanie załadowany
+    LaunchedEffect(key1 = taskId) {
+        viewModel.fetchTaskDetails(taskId)
+    }
+
+    val task by viewModel.selectedTask.collectAsState()
+    val statusText by viewModel.statusText.collectAsState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Top
+    ) {
+        // Dodany przycisk powrotu na górę
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+            Button(onClick = { navController.popBackStack() }) {
+                Text("< Wróć")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (task == null) {
+            // Jeśli obiekt jest pusty, pokazujemy status (Ładowanie lub Błąd)
+            CircularProgressIndicator()
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(text = statusText)
+        } else {
+            // Właściwy interfejs szczegółów (odpowiednik _build_task_window_ui)
+            Text(
+                text = task?.title ?: "Brak nazwy",
+                style = MaterialTheme.typography.headlineMedium
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("ID: ${task?.id}")
+                    Text("Status: ${task?.status}")
+                    Text("Czas pracy: ${(task?.timeSpent ?: 0.0) / 60} h")
+                    Text("Deadline: ${task?.deadline ?: "Nieokreślony"}")
+                    Text("Odpowiedzialny: ${task?.responsible ?: "Brak"}")
+
+                    val chatIdToDisplay = task?.chatId ?: task?.chatIdAlt
+                    if (chatIdToDisplay != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Powiązany czat: $chatIdToDisplay",
+                            color = androidx.compose.ui.graphics.Color.Blue
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(text = statusText, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
 class BitrixViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val _selectedTask = MutableStateFlow<BitrixTask?>(null)
+
+    val selectedTask: StateFlow<BitrixTask?> = _selectedTask.asStateFlow()
 
     private val _isFetching = MutableStateFlow(false)
     val isFetching: StateFlow<Boolean> = _isFetching.asStateFlow()
@@ -236,6 +367,61 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
                 // Obsługa błędu, jeśli JSON w cache nie pasuje do modelu
             }
         }
+    }
+
+    fun fetchTaskDetails(taskId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _statusText.value = "Pobieranie szczegółów zadania $taskId..."
+            // Zabezpieczenie: czyścimy stary widok przed załadowaniem nowego
+            _selectedTask.value = null
+
+            try {
+                // 1. Próba pobrania z API
+                val response = RetrofitClient.api.getTaskDetails(taskId)
+                val taskData = response.result.task
+
+                // 2. Zapis do cache (odpowiednik json.dump)
+                val finalJson = Gson().toJson(taskData)
+                cacheManager.saveTaskDetail(taskId, finalJson)
+
+                // 3. Wysłanie danych do interfejsu
+                _selectedTask.value = taskData
+                _statusText.value = "Pobrano szczegóły z sieci!"
+
+                // 4. Tutaj uruchamiamy wątek wiadomości (jak w Pythonie)
+                triggerChatFetch(taskData)
+
+            } catch (e: Exception) {
+                // 5. Błąd API - próbujemy czytać z lokalnego pliku (odpowiednik bloku except)
+                val cachedJson = cacheManager.readTaskDetail(taskId)
+                if (cachedJson != null) {
+                    val taskData = Gson().fromJson(cachedJson, BitrixTask::class.java)
+                    _selectedTask.value = taskData
+                    _statusText.value = "Brak sieci. Wczytano lokalną kopię."
+
+                    triggerChatFetch(taskData)
+                } else {
+                    // Brak i internetu, i pliku (odpowiednik messagebox.showerror)
+                    _statusText.value = "Błąd: Brak internetu i brak lokalnej kopii zadania."
+                }
+            }
+        }
+    }
+
+    private fun triggerChatFetch(task: BitrixTask) {
+        // Zabezpieczenie przed brakiem ID lub inną wielkością liter
+        val chatId = task.chatId ?: task.chatIdAlt
+        if (chatId != null) {
+            // Zamiast threading.Thread odpalamy nową korutynę w tle
+            viewModelScope.launch(Dispatchers.IO) {
+                bgFetchMessages(task, chatId)
+            }
+        }
+    }
+
+    private suspend fun bgFetchMessages(task: BitrixTask, chatId: String) {
+        // Tutaj w przyszłości dodasz logikę pobierania wiadomości chatu
+        println("Rozpoczęto pobieranie chatu $chatId dla zadania ${task.id}")
     }
 
 
