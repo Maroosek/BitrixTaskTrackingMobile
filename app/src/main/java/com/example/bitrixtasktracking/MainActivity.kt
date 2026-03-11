@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,11 +16,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -35,10 +41,21 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import com.google.gson.annotations.SerializedName
+import com.google.gson.Gson
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import com.google.gson.reflect.TypeToken
 
 // Reprezentuje pojedyncze zadanie z Bitrixa
 data class BitrixResponse(
-    @SerializedName("result") val result: BitrixResult
+    @SerializedName("result") val result: BitrixResult,
+    @SerializedName("next") val next: Int? = null
 )
 
 data class BitrixResult(
@@ -48,9 +65,9 @@ data class BitrixResult(
 data class BitrixTask(
     @SerializedName("id") val id: String?,
     @SerializedName("title") val title: String?,
-    @SerializedName("status") val status: String?, // Bitrix często zwraca status jako cyfrę (np. "3")
+    @SerializedName("status") val status: Int?,
     @SerializedName("realStatus") val realStatus: String?,
-    @SerializedName("timeSpentInLogs") val timeSpent: String?,
+    @SerializedName("timeSpentInLogs") val timeSpent: Double?,
     @SerializedName("deadline") val deadline: String?,
     @SerializedName("activityDate") val activity: String?,
     @SerializedName("createdDate") val createdAt: String?,
@@ -82,44 +99,94 @@ fun MainScreen(viewModel: BitrixViewModel, modifier: Modifier = Modifier) {
     val isFetching by viewModel.isFetching.collectAsState()
     val statusText by viewModel.statusText.collectAsState()
     val tasksText by viewModel.tasksText.collectAsState()
-    // DODANO: Nasłuchiwanie obecnego trybu
     val currentMode by viewModel.currentMode.collectAsState()
+    val currentFilter by viewModel.currentFilter.collectAsState()
+
+    // DODANO: Pobieramy listę tasków z ViewModelu
+    val tasksList by viewModel.tasksList.collectAsState()
+
+    var expanded by remember { mutableStateOf(false) }
+    val filterOptions = listOf("Pobieranie tasków", "Wszystkie aktywne", "Surowe")
 
     Column(
         modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(text = statusText)
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // POPRAWIONO: Ten przycisk ma pobierać dane
-        Button(
-            onClick = { viewModel.fetchData(isAuto = false) },
-            enabled = !isFetching
+        // Górny panel z przyciskami (żeby zachować porządek, dodajemy mu padding)
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(text = "Pobierz ręcznie")
+            Text(text = statusText)
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Box {
+                Button(onClick = { expanded = true }, enabled = !isFetching) {
+                    Text(text = "Tryb testowy: $currentFilter")
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    filterOptions.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option) },
+                            onClick = {
+                                viewModel.setFilter(option)
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = { viewModel.fetchData(isAuto = false) }, enabled = !isFetching) {
+                Text(text = "Pobierz ręcznie")
+            }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // POPRAWIONO: Ten przycisk ma przełączać tryb
-        Button(
-            onClick = { viewModel.toggleMode() },
-            enabled = !isFetching
-        ) {
-            Text(text = "Przełącz tryb (obecnie: $currentMode)")
+        // DODANO: Logika wyświetlania danych
+        if (currentFilter == "Surowe") {
+            // Pokazujemy surowy JSON tylko dla tego trybu
+            Text(
+                text = tasksText,
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            )
+        } else {
+            // Pokazujemy ładną listę kafelków
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp)
+            ) {
+                items(tasksList) { task ->
+                    TaskCard(task = task, onClick = {
+                        // Tutaj na razie wywołujemy prostą akcję w konsoli.
+                        // Docelowo tu będzie kod otwierający nowy ekran!
+                        println("Kliknięto zadanie o ID: ${task.id}")
+                        viewModel._statusText.value = "Kliknięto: ${task.title}"
+                    })
+                }
+            }
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = tasksText,
-            modifier = Modifier
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState())
-        )
+// DODANO: Nowy komponent - pojedynczy kafelek zadania
+@Composable
+fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+            .clickable { onClick() }, // To sprawia, że cały kafelek reaguje na kliknięcie
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(text = task.title ?: "Brak tytułu", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(text = "ID: ${task.id} | Status: ${task.status}", style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
+            Text(text = "Deadline: ${task.deadline ?: "Brak"}", style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
+        }
     }
 }
 
@@ -128,7 +195,7 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
     private val _isFetching = MutableStateFlow(false)
     val isFetching: StateFlow<Boolean> = _isFetching.asStateFlow()
 
-    private val _statusText = MutableStateFlow("Oczekuję na akcję...")
+    val _statusText = MutableStateFlow("Oczekuję na akcję...")
     val statusText: StateFlow<String> = _statusText.asStateFlow()
 
     private val _tasksText = MutableStateFlow("")
@@ -137,7 +204,12 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
     private val _currentMode = MutableStateFlow("tasks")
     val currentMode: StateFlow<String> = _currentMode.asStateFlow()
 
-    var currentFilter = "Wszystkie"
+    private val _currentFilter = MutableStateFlow("Pobieranie tasków")
+    val currentFilter: StateFlow<String> = _currentFilter.asStateFlow()
+
+    private val _tasksList = MutableStateFlow<List<BitrixTask>>(emptyList())
+
+    val tasksList: StateFlow<List<BitrixTask>> = _tasksList.asStateFlow()
 
     private val cacheManager = JsonUtil(application)
 
@@ -145,11 +217,24 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
         checkJson()
     }
 
-    fun checkJson(){
+    fun setFilter(newFilter: String) {
+        _currentFilter.value = newFilter
+    }
+
+    fun checkJson() {
         val cachedData = cacheManager.readJson()
-        if (cachedData != null && _tasksText.value.isEmpty()) {
+        if (cachedData != null && _tasksList.value.isEmpty()) {
             _statusText.value = "Wyświetlam dane z pamięci podręcznej..."
-            _tasksText.value = cachedData
+            _tasksText.value = cachedData // Zostawiamy dla trybu "Surowe"
+
+            // DODANO: Zamiana zapisanego JSONa z powrotem na listę obiektów
+            try {
+                val listType = object : TypeToken<List<BitrixTask>>() {}.type
+                val tasks: List<BitrixTask> = Gson().fromJson(cachedData, listType)
+                _tasksList.value = tasks
+            } catch (e: Exception) {
+                // Obsługa błędu, jeśli JSON w cache nie pasuje do modelu
+            }
         }
     }
 
@@ -175,50 +260,128 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+
     private suspend fun bgFetchAllTasks(isAuto: Boolean) {
-        if (currentFilter == "W trakcie") {
-            fetchInProgressTasks(isAuto)
-        } else {
-            fetchStandardTasksRaw(isAuto)
+        // POPRAWIONO: Wywołanie odpowiedniej funkcji na podstawie wybranego filtra
+        when (_currentFilter.value) {
+            "Wszystkie aktywne" -> fetchInProgressTasks(isAuto)
+            "Surowe" -> fetchStandardTasksRaw(isAuto)
+            else -> fetchStandardTasks(isAuto) // Domyślnie "Pobieranie tasków"
         }
     }
 
     private suspend fun fetchInProgressTasks(isAuto: Boolean) {
-        delay(2000)
-        _statusText.value = "Pobrano zadania 'W trakcie'!"
-        _isFetching.value = false
+        try {
+            _statusText.value = "Rozpoczynam pobieranie zadań 'W trakcie'..."
+
+            val allTasks = mutableListOf<BitrixTask>()
+            var start = 0
+
+            val dateStr = LocalDateTime.now().minusDays(7)
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'00:00:00+01:00"))
+
+            while (true) {
+                // Wywołanie API z dynamicznymi parametrami
+                val response = RetrofitClient.api.getTasks(
+                    start = start,
+                    realStatus = 3,
+                    activityDate = dateStr
+                )
+
+                val tasksBatch = response.result.tasks
+
+                if (tasksBatch.isEmpty()) {
+                    break
+                }
+
+                allTasks.addAll(tasksBatch)
+                _statusText.value = "Pobrano ${allTasks.size} zadań 'W trakcie'..."
+
+                val next = response.next
+                if (next != null) {
+                    start = next
+                } else {
+                    break
+                }
+            }
+
+            val finalJson = Gson().toJson(allTasks)
+            cacheManager.saveJson(finalJson)
+
+            _statusText.value = "Zakończono pobieranie! Razem: ${allTasks.size} zadań."
+            _tasksText.value = finalJson
+
+            _tasksList.value = allTasks
+
+        } catch (e: Exception) {
+            _statusText.value = "Błąd komunikacji z API"
+            _tasksText.value = "Wyjątek: ${e.javaClass.simpleName}\nTreść: ${e.message}"
+        } finally {
+            _isFetching.value = false
+        }
     }
 
     private suspend fun fetchStandardTasks(isAuto: Boolean) {
         try {
-            // 1. Pobieramy WSZYSTKIE zadania. Retrofit sam zamienia JSON na obiekty.
-            val response = RetrofitClient.api.getTasks()
-            val allTasks = response.result.tasks
+            _statusText.value = "Rozpoczynam pobieranie wszystkich zadań..."
 
-            // 2. Filtrujemy po pobraniu (w pamięci telefonu)
-            val filteredTasks = if (currentFilter == "W trakcie") {
-                // W Bitrixie status "W trakcie" (In Progress) to często ID "3", ale możesz dostosować warunek
-                allTasks.filter { task ->
-                    task.status == "3" || task.realStatus == "3" || task.status == "W trakcie"
+            val allTasks = mutableListOf<BitrixTask>()
+            var start = 0
+
+            // Pętla pobierająca paczki po 50 elementów
+            while (true) {
+                val response = RetrofitClient.api.getTasks(start = start)
+                val tasksBatch = response.result.tasks
+
+                if (tasksBatch.isEmpty()) {
+                    break
                 }
-            } else {
-                allTasks // Zwracamy wszystko, jeśli filtr jest inny
+
+                allTasks.addAll(tasksBatch)
+                _statusText.value = "Pobrano ${allTasks.size} zadań..."
+
+                val next = response.next
+                if (next != null) {
+                    start = next
+                } else {
+                    break
+                }
             }
 
-            // 3. Budujemy tekst do wyświetlenia na ekranie dla celów testowych
-            val stringBuilder = StringBuilder()
-            stringBuilder.append("Pobrano: ${allTasks.size} | Po filtrze: ${filteredTasks.size}\n\n")
+            // DODANO: Odwrócenie całej listy w miejscu (najnowsze trafiają na indeks 0)
+            allTasks.reverse()
 
-            filteredTasks.forEach { task ->
+            val fetchedTasksStandard = Gson().toJson(allTasks)
+            cacheManager.saveJson(fetchedTasksStandard)
+
+            _statusText.value = "Pobrano wszystkie zadania!"
+            _tasksText.value = fetchedTasksStandard // Możesz usunąć budowanie StringBuildera!
+            // DODANO: Zapisujemy listę do stanu
+            _tasksList.value = allTasks
+
+            // Budujemy tekst do wyświetlenia na ekranie dla celów testowych
+            val stringBuilder = StringBuilder()
+            stringBuilder.append("Łącznie pobrano: ${allTasks.size} zadań\n\n")
+
+            allTasks.forEach { task ->
+                // POPRAWIONO: Bezpieczna konwersja String na Int przed dzieleniem
+                val timeSpent = task.timeSpent?.div(60)
+
                 stringBuilder.append("ID: ${task.id} | ${task.title}\n")
                 stringBuilder.append("Status: ${task.status} | Deadline: ${task.deadline}\n")
-                stringBuilder.append("Czas: ${task.timeSpent}\n")
-                stringBuilder.append("aktywnosc: ${task.activity}")
+                stringBuilder.append("Czas: ${timeSpent} h\n")
+                stringBuilder.append("Aktywność: ${task.activity}\n")
+                stringBuilder.append("Utworzono: ${task.createdAt}\n")
+                stringBuilder.append("Odpowiedzialny: ${task.responsible}\n")
                 stringBuilder.append("----------------------------\n")
             }
 
-            _statusText.value = "Pobrano i przefiltrowano!"
+            _statusText.value = "Pobrano wszystkie zadania!"
             _tasksText.value = stringBuilder.toString()
+
+            // Cache zapisze listę już w odwróconej, poprawnej kolejności
+            val fetchedTasks = Gson().toJson(allTasks)
+            cacheManager.saveJson(fetchedTasks)
 
         } catch (e: Exception) {
             _statusText.value = "Błąd pobierania"
