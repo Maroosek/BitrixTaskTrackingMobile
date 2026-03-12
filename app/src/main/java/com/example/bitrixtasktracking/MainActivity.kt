@@ -47,8 +47,11 @@ import java.time.format.DateTimeFormatter
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import com.google.gson.reflect.TypeToken
@@ -62,10 +65,16 @@ import androidx.navigation.NavController
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+
+import java.time.ZonedDateTime
 
 
 // Reprezentuje pojedyncze zadanie z Bitrixa
@@ -89,15 +98,55 @@ data class SingleTaskResult(
 data class BitrixTask(
     @SerializedName("id") val id: String?,
     @SerializedName("title") val title: String?,
+    @SerializedName("description") val description: String?,
     @SerializedName("status") val status: Int?,
-    @SerializedName("realStatus") val realStatus: String?,
     @SerializedName("timeSpentInLogs") val timeSpent: Double?,
     @SerializedName("deadline") val deadline: String?,
     @SerializedName("activityDate") val activity: String?,
     @SerializedName("createdDate") val createdAt: String?,
-    @SerializedName("responsibleId") val responsible: String?,
-    @SerializedName("chatId") val chatId: String?,
-    @SerializedName("CHAT_ID") val chatIdAlt: String?
+    @SerializedName("chatId") val chatId: Int?, // Zmiana na Int
+    @SerializedName("chat_Id") val chatIdAlt: Int?, // Zmiana na Int
+    @SerializedName("creator") val creator: BitrixUser?,
+    @SerializedName("responsible") val responsible: BitrixUser?
+)
+
+data class BitrixUser(
+    @SerializedName("id") val id: String?,
+    @SerializedName("name") val name: String?,
+    @SerializedName("icon") val icon: String?,
+    @SerializedName("workPosition") val workPosition: String?
+)
+
+data class ChatResponse(
+    @SerializedName("result") val result: ChatResult?
+)
+
+data class ChatResult(
+    @SerializedName("messages") val messages: List<ChatMessage>?
+)
+
+data class ChatMessage(
+    @SerializedName("id") val id: Int?,
+    @SerializedName("text") val text: String?,
+    @SerializedName("author_id") val authorId: String?,
+    @SerializedName("date") val date: String?
+)
+
+data class UsersResponse(
+    @SerializedName("result") val result: List<BitrixGlobalUser>?,
+    @SerializedName("next") val next: Int?
+)
+
+data class BitrixGlobalUser(
+    @SerializedName("ID") val id: String?,
+    @SerializedName("NAME") val name: String?,
+    @SerializedName("LAST_NAME") val lastName: String?,
+    @SerializedName("PERSONAL_PHOTO") val photo: String?
+)
+
+data class UserProfile(
+    val name: String,
+    val photoUrl: String?
 )
 
 class MainActivity : ComponentActivity() {
@@ -141,6 +190,54 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+// Przelicza sekundy na czytelny format (np. "5h 19m")
+fun formatTimeSpent(seconds: Double?): String {
+    if (seconds == null || seconds <= 0.0) return "0h 0m"
+    val totalMinutes = (seconds / 60).toLong()
+    val hours = totalMinutes / 60
+    val mins = totalMinutes % 60
+    return if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
+}
+
+// Formatuje datę ISO z Bitrixa na polski format
+fun formatBitrixDate(dateString: String?): String {
+    if (dateString.isNullOrEmpty()) return "Brak daty"
+    return try {
+        val parsedDate = ZonedDateTime.parse(dateString)
+        val formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
+        parsedDate.format(formatter)
+    } catch (e: Exception) {
+        dateString // W razie błędu zwraca oryginalny tekst
+    }
+}
+
+@Composable
+fun UserProfileRow(user: BitrixUser?, roleLabel: String) {
+    if (user == null) return
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(vertical = 4.dp)
+    ) {
+        AsyncImage(
+            model = getFullAvatarUrl(user.icon),
+            contentDescription = "Avatar użytkownika",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column {
+            Text(text = roleLabel, style = MaterialTheme.typography.labelSmall, color = androidx.compose.ui.graphics.Color.Gray)
+            Text(text = user.name ?: "Nieznany", style = MaterialTheme.typography.bodyMedium)
+            if (!user.workPosition.isNullOrEmpty()) {
+                Text(text = user.workPosition, style = MaterialTheme.typography.bodySmall, color = androidx.compose.ui.graphics.Color.Gray)
             }
         }
     }
@@ -227,21 +324,81 @@ fun MainScreen(
     }
 }
 
+fun getFullAvatarUrl(iconPath: String?): String {
+    if (iconPath.isNullOrEmpty()) return ""
+    // Zmień "https://twojadomena.bitrix24.pl" na swój właściwy adres
+    return if (iconPath.startsWith("/")) {
+        "https://jenaeuropa.bitrix24.pl$iconPath"
+    } else {
+        iconPath
+    }
+}
+
 // DODANO: Nowy komponent - pojedynczy kafelek zadania
+// Zaktualizowany komponent - pojedynczy kafelek zadania
 @Composable
 fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
+    // Mapowanie statusów liczbowych na tekst
+    val statusText = when (task.status) {
+        1 -> "Nowe"
+        2 -> "Oczekujące"
+        3 -> "W trakcie"
+        4 -> "Do kontroli"
+        5 -> "Zakończone"
+        6 -> "Odłożone"
+        else -> "Nieznany (${task.status})"
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp)
-            .clickable { onClick() }, // To sprawia, że cały kafelek reaguje na kliknięcie
+            .clickable { onClick() },
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(text = task.title ?: "Brak tytułu", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+            // Tytuł
+            Text(
+                text = task.title ?: "Brak tytułu",
+                style = MaterialTheme.typography.titleMedium
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // ID i zmapowany Status
+            Text(
+                text = "ID: ${task.id} | Status: $statusText",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+            )
+
             Spacer(modifier = Modifier.height(4.dp))
-            Text(text = "ID: ${task.id} | Status: ${task.status}", style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
-            Text(text = "Deadline: ${task.deadline ?: "Brak"}", style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
+
+            // Daty
+            Text(
+                text = "Utworzono: ${task.createdAt ?: "Brak danych"}",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                text = "Deadline: ${task.deadline ?: "Brak"}",
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Divider(thickness = 0.5.dp, color = androidx.compose.ui.graphics.Color.LightGray)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Osoby przypisane
+            Text(
+                text = "Zleceniodawca: ${task.creator?.name ?: "Nieznany"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = androidx.compose.ui.graphics.Color.DarkGray
+            )
+            Text(
+                text = "Odpowiedzialny: ${task.responsible?.name ?: "Nieznany"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = androidx.compose.ui.graphics.Color.DarkGray
+            )
         }
     }
 }
@@ -250,9 +407,8 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
 fun TaskDetailScreen(
     taskId: String,
     navController: NavController,
-    viewModel: BitrixViewModel // Musisz podać viewModel w wywołaniu z NavHost!
+    viewModel: BitrixViewModel
 ) {
-    // To wywoła się tylko raz, gdy ekran zostanie załadowany
     LaunchedEffect(key1 = taskId) {
         viewModel.fetchTaskDetails(taskId)
     }
@@ -260,14 +416,19 @@ fun TaskDetailScreen(
     val task by viewModel.selectedTask.collectAsState()
     val statusText by viewModel.statusText.collectAsState()
 
+    // DODANO: Pobieranie listy wiadomości
+    val chatMessages by viewModel.chatMessages.collectAsState()
+    val usersMap by viewModel.usersMap.collectAsState()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(16.dp)
+            // DODANO: Scrollowanie dla całego ekranu, żeby czat się zmieścił
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top
     ) {
-        // Dodany przycisk powrotu na górę
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
             Button(onClick = { navController.popBackStack() }) {
                 Text("< Wróć")
@@ -277,38 +438,130 @@ fun TaskDetailScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         if (task == null) {
-            // Jeśli obiekt jest pusty, pokazujemy status (Ładowanie lub Błąd)
             CircularProgressIndicator()
             Spacer(modifier = Modifier.height(16.dp))
             Text(text = statusText)
         } else {
-            // Właściwy interfejs szczegółów (odpowiednik _build_task_window_ui)
             Text(
                 text = task?.title ?: "Brak nazwy",
                 style = MaterialTheme.typography.headlineMedium
             )
             Spacer(modifier = Modifier.height(16.dp))
 
+            // PRZYWRÓCONO: Karta ze szczegółami zadania
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("ID: ${task?.id}")
-                    Text("Status: ${task?.status}")
-                    Text("Czas pracy: ${(task?.timeSpent ?: 0.0) / 60} h")
-                    Text("Deadline: ${task?.deadline ?: "Nieokreślony"}")
-                    Text("Odpowiedzialny: ${task?.responsible ?: "Brak"}")
+                    Text("ID: ${task?.id}", style = MaterialTheme.typography.bodyMedium)
+                    Text("Status: ${task?.status}", style = MaterialTheme.typography.bodyMedium)
+                    Text("Czas pracy: ${formatTimeSpent(task?.timeSpent)}", style = MaterialTheme.typography.bodyMedium)
+                    Text("Deadline: ${formatBitrixDate(task?.deadline)}", style = MaterialTheme.typography.bodyMedium)
+                    Text("Utworzono: ${formatBitrixDate(task?.createdAt)}", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
 
-                    val chatIdToDisplay = task?.chatId ?: task?.chatIdAlt
-                    if (chatIdToDisplay != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Powiązany czat: $chatIdToDisplay",
-                            color = androidx.compose.ui.graphics.Color.Blue
+            // Karta z osobami przypisanymi
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    UserProfileRow(user = task?.creator, roleLabel = "Zleceniodawca")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    UserProfileRow(user = task?.responsible, roleLabel = "Odpowiedzialny")
+                }
+            }
+
+            // Opis
+            if (!task?.description.isNullOrEmpty()) {
+                Text(text = "Opis zadania:", style = MaterialTheme.typography.titleMedium)
+                Text(text = task?.description ?: "", modifier = Modifier.padding(top = 4.dp, bottom = 16.dp))
+            }
+
+            if (chatMessages.isNotEmpty()) {
+                Divider(modifier = Modifier.padding(vertical = 16.dp))
+                Text(
+                    text = "Czat zadania (${chatMessages.size} wiadomości)",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.align(Alignment.Start)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Wyświetlanie wiadomości
+                chatMessages.forEach { message ->
+
+                    // Rozpoznawanie wiadomości systemowych
+                    val isSystem = message.authorId == "0"
+
+                    val authorProfile = usersMap[message.authorId]
+                    val authorName = if (isSystem) "System" else (authorProfile?.name ?: "Nieznany ID: ${message.authorId}")
+                    val avatarUrl = if (isSystem) "" else getFullAvatarUrl(authorProfile?.photoUrl)
+                    val messageDate = formatBitrixDate(message.date)
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        // Delikatnie inny kolor dla wiadomości systemowych
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSystem) androidx.compose.ui.graphics.Color(0xFFFFF9C4) else androidx.compose.ui.graphics.Color(0xFFF0F0F0)
                         )
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (avatarUrl.isNotEmpty()) {
+                                        AsyncImage(
+                                            model = avatarUrl,
+                                            contentDescription = "Avatar",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .clip(CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                    } else if (!isSystem) {
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowBack, // Zmień na ikonę profilu np. Icons.Default.Person
+                                            contentDescription = "Brak avatara",
+                                            modifier = Modifier.size(24.dp).clip(CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                    }
+
+                                    // Nazwa autora
+                                    Text(
+                                        text = authorName,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (isSystem) androidx.compose.ui.graphics.Color.DarkGray else androidx.compose.ui.graphics.Color.Black
+                                    )
+                                }
+
+                                // Znacznik czasu na prawo
+                                Text(
+                                    text = messageDate,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = androidx.compose.ui.graphics.Color.Gray
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = message.text ?: "[Brak tekstu]",
+                                style = if (isSystem) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+                                fontStyle = if (isSystem) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal
+                            )
+                        }
                     }
                 }
+            } else if (task?.chatId != null || task?.chatIdAlt != null) {
+                Text("Trwa pobieranie wiadomości...", style = MaterialTheme.typography.bodySmall)
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -321,7 +574,14 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _selectedTask = MutableStateFlow<BitrixTask?>(null)
 
+    // Słownik wszystkich użytkowników: kluczem jest ID
+    private val _usersMap = MutableStateFlow<Map<String, UserProfile>>(emptyMap())
+    val usersMap: StateFlow<Map<String, UserProfile>> = _usersMap.asStateFlow()
+
     val selectedTask: StateFlow<BitrixTask?> = _selectedTask.asStateFlow()
+
+    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages.asStateFlow()
 
     private val _isFetching = MutableStateFlow(false)
     val isFetching: StateFlow<Boolean> = _isFetching.asStateFlow()
@@ -346,10 +606,58 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         checkJson()
+        loadAllUsers()
     }
 
     fun setFilter(newFilter: String) {
         _currentFilter.value = newFilter
+    }
+
+    private fun loadAllUsers() {
+        viewModelScope.launch(Dispatchers.IO) {
+            // 1. Najpierw czytamy z pamięci (jak w Pythonie self.users_map)
+            val cachedData = cacheManager.readUsersList()
+            if (cachedData != null) {
+                try {
+                    val mapType = object : TypeToken<Map<String, UserProfile>>() {}.type
+                    _usersMap.value = Gson().fromJson(cachedData, mapType)
+                } catch (e: Exception) {
+                    println("Błąd odczytu lokalnych użytkowników")
+                }
+            }
+
+            // 2. Pobieramy świeże dane w pętli (odpowiednik fetch_all_users)
+            val allUsers = mutableMapOf<String, UserProfile>()
+            var start = 0
+
+            try {
+                while (true) {
+                    val response = RetrofitClient.api.getUsers(start = start)
+                    val usersBatch = response.result ?: break
+
+                    for (u in usersBatch) {
+                        val uid = u.id ?: continue
+                        val fullName = "${u.name ?: ""} ${u.lastName ?: ""}".trim()
+                        allUsers[uid] = UserProfile(fullName, u.photo)
+                    }
+
+                    if (response.next != null) {
+                        start = response.next
+                    } else {
+                        break
+                    }
+                }
+
+                if (allUsers.isNotEmpty()) {
+                    _usersMap.value = allUsers
+                    val finalJson = Gson().toJson(allUsers)
+                    cacheManager.saveUsersList(finalJson)
+                }
+
+            } catch (e: Exception) {
+                println("Błąd pobierania użytkowników: ${e.message}")
+            }
+        }
     }
 
     fun checkJson() {
@@ -374,34 +682,34 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
             _statusText.value = "Pobieranie szczegółów zadania $taskId..."
             // Zabezpieczenie: czyścimy stary widok przed załadowaniem nowego
             _selectedTask.value = null
+            _chatMessages.value = emptyList() // Czyścimy stary czat!
 
             try {
-                // 1. Próba pobrania z API
-                val response = RetrofitClient.api.getTaskDetails(taskId)
-                val taskData = response.result.task
+                val response = RetrofitClient.api.getTaskDetailsRaw(taskId)
+                val rawJson = response.string()
 
-                // 2. Zapis do cache (odpowiednik json.dump)
-                val finalJson = Gson().toJson(taskData)
-                cacheManager.saveTaskDetail(taskId, finalJson)
+                cacheManager.saveTaskDetail(taskId, rawJson)
 
-                // 3. Wysłanie danych do interfejsu
+                val parsedResponse = Gson().fromJson(rawJson, SingleTaskResponse::class.java)
+                val taskData = parsedResponse.result.task
+
                 _selectedTask.value = taskData
                 _statusText.value = "Pobrano szczegóły z sieci!"
 
-                // 4. Tutaj uruchamiamy wątek wiadomości (jak w Pythonie)
+                // Po prostu wywołujemy pobieranie, bez przypisywania (to funkcja asynchroniczna)
                 triggerChatFetch(taskData)
 
             } catch (e: Exception) {
-                // 5. Błąd API - próbujemy czytać z lokalnego pliku (odpowiednik bloku except)
                 val cachedJson = cacheManager.readTaskDetail(taskId)
                 if (cachedJson != null) {
-                    val taskData = Gson().fromJson(cachedJson, BitrixTask::class.java)
+                    val parsedResponse = Gson().fromJson(cachedJson, SingleTaskResponse::class.java)
+                    val taskData = parsedResponse.result.task
+
                     _selectedTask.value = taskData
                     _statusText.value = "Brak sieci. Wczytano lokalną kopię."
 
                     triggerChatFetch(taskData)
                 } else {
-                    // Brak i internetu, i pliku (odpowiednik messagebox.showerror)
                     _statusText.value = "Błąd: Brak internetu i brak lokalnej kopii zadania."
                 }
             }
@@ -409,19 +717,51 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun triggerChatFetch(task: BitrixTask) {
-        // Zabezpieczenie przed brakiem ID lub inną wielkością liter
+        // Zabezpieczenie przed brakiem ID
         val chatId = task.chatId ?: task.chatIdAlt
         if (chatId != null) {
-            // Zamiast threading.Thread odpalamy nową korutynę w tle
             viewModelScope.launch(Dispatchers.IO) {
                 bgFetchMessages(task, chatId)
             }
         }
     }
 
-    private suspend fun bgFetchMessages(task: BitrixTask, chatId: String) {
-        // Tutaj w przyszłości dodasz logikę pobierania wiadomości chatu
-        println("Rozpoczęto pobieranie chatu $chatId dla zadania ${task.id}")
+    private suspend fun bgFetchMessages(task: BitrixTask, chatId: Int) {
+        val messages = mutableListOf<ChatMessage>()
+        var lastId: Int? = null
+
+        try {
+            while (true) {
+                val response = RetrofitClient.api.getChatMessages(
+                    dialogId = "chat$chatId",
+                    lastId = lastId
+                )
+
+                val fetched = response.result?.messages ?: emptyList()
+                if (fetched.isEmpty()) break
+
+                messages.addAll(fetched)
+
+                val validIds = fetched.mapNotNull { it.id }
+                if (validIds.isEmpty()) break
+
+                lastId = validIds.minOrNull()
+                delay(500)
+            }
+
+            if (messages.isNotEmpty()) {
+                val finalJson = Gson().toJson(messages)
+                cacheManager.saveChat(chatId.toString(), finalJson)
+
+                println("Pobrano ${messages.size} wiadomości dla czatu $chatId")
+
+                // DODANO: Przekazanie wiadomości do interfejsu!
+                _chatMessages.value = messages
+            }
+
+        } catch (e: Exception) {
+            println("Błąd pobierania wiadomości: ${e.message}")
+        }
     }
 
 
@@ -497,7 +837,7 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
             _statusText.value = "Zakończono pobieranie! Razem: ${allTasks.size} zadań."
             _tasksText.value = finalJson
 
-            _tasksList.value = allTasks
+            _tasksList.value = allTasks.reversed()
 
         } catch (e: Exception) {
             _statusText.value = "Błąd komunikacji z API"

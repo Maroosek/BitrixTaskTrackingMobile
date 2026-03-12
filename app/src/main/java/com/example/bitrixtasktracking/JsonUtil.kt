@@ -35,4 +35,20 @@ class JsonUtil (private val context: Context) {
         return if (file.exists()) file.readText() else null
     }
 
+    fun saveChat(toString: String, finalJson: String) {
+        val file = File(detailsDir, "task_$toString.json")
+        file.writeText(finalJson)
+    }
+
+    fun saveUsersList(jsonString: String) {
+        val file = File(context.filesDir, "users_list.json")
+        file.writeText(jsonString)
+    }
+
+    // Odczytuje listę użytkowników
+    fun readUsersList(): String? {
+        val file = File(context.filesDir, "users_list.json")
+        return if (file.exists()) file.readText() else null
+    }
+
 }
