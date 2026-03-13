@@ -1,11 +1,13 @@
 package com.example.bitrixtasktracking.api
 
+import android.app.Dialog
 import com.example.bitrixtasktracking.BitrixResponse
 import com.example.bitrixtasktracking.ChatResponse
 import com.example.bitrixtasktracking.SingleTaskResponse
 import com.example.bitrixtasktracking.UsersResponse
 import okhttp3.ResponseBody
 import retrofit2.http.GET
+import retrofit2.http.POST
 import retrofit2.http.Query
 
 interface BitrixApi {
@@ -17,11 +19,8 @@ interface BitrixApi {
         @Query("filter[>=ACTIVITY_DATE]") activityDate: String? = null
     ): BitrixResponse
 
-    @GET("tasks.task.list.json?start=1100")
-    suspend fun getTasksRaw(): ResponseBody
-
 //    @GET("tasks.task.list.json?start=1100")
-//    suspend fun getTasks(): BitrixResponse
+//    suspend fun getTasksRaw(): ResponseBody
 
     @GET("im.dialog.messages.get")
     suspend fun getChatMessages(
@@ -33,8 +32,15 @@ interface BitrixApi {
     @GET("tasks.task.get")
     suspend fun getTaskDetailsRaw(@Query("taskId") taskId: String): ResponseBody
 
-    @GET("tasks.task.get")
-    suspend fun getTaskDetails(@Query("taskId") taskId: String): SingleTaskResponse
+//    @GET("tasks.task.get")
+//    suspend fun getTaskDetails(@Query("taskId") taskId: String): SingleTaskResponse
+
+    @POST("im.message.add")
+    suspend fun sendMessage(
+        @Query("DIALOG_ID") chatId: String,
+        @Query("MESSAGE") message: String,
+        @Query("SYSTEM") system: String,
+    )
 
     @GET("user.get.json")
     suspend fun getUsers(@Query("start") start: Int = 0): UsersResponse

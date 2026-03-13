@@ -29,7 +29,33 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.ViewModel
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Divider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.background
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.animation.animateContentSize
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material3.FloatingActionButton
+
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bitrixtasktracking.network.RetrofitClient
@@ -42,44 +68,40 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import com.google.gson.annotations.SerializedName
 import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import com.google.gson.reflect.TypeToken
+import java.time.ZonedDateTime
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import androidx.navigation.NavController
-
-import androidx.compose.material.icons.Icons
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
-
-import java.time.ZonedDateTime
-
-import androidx.compose.foundation.background
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
+
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.material3.IconButton
+
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 
 
 // Reprezentuje pojedyncze zadanie z Bitrixa
@@ -166,16 +188,6 @@ data class UserTimeSummary(
     val activeStartDt: ZonedDateTime?
 )
 
-// Formatyzer czasu na żywo (np. 01:25:10)
-fun formatTimeSpentLive(seconds: Double?): String {
-    if (seconds == null || seconds <= 0.0) return "00:00:00"
-    val totalSeconds = seconds.toLong()
-    val h = totalSeconds / 3600
-    val m = (totalSeconds % 3600) / 60
-    val s = totalSeconds % 60
-    return String.format("%02d:%02d:%02d", h, m, s)
-}
-
 data class UserProfile(
     val name: String,
     val photoUrl: String?
@@ -226,6 +238,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+// Formatyzer czasu na żywo (np. 01:25:10)
+fun formatTimeSpentLive(seconds: Double?): String {
+    if (seconds == null || seconds <= 0.0) return "00:00:00"
+    val totalSeconds = seconds.toLong()
+    val h = totalSeconds / 3600
+    val m = (totalSeconds % 3600) / 60
+    val s = totalSeconds % 60
+    return String.format("%02d:%02d:%02d", h, m, s)
+}
+
+fun getFullAvatarUrl(iconPath: String?): String {
+    if (iconPath.isNullOrEmpty()) return ""
+    // Zmień "https://twojadomena.bitrix24.pl" na swój właściwy adres
+    return if (iconPath.startsWith("/")) {
+        "https://jenaeuropa.bitrix24.pl$iconPath"
+    } else {
+        iconPath
+    }
+}
+
+
 
 // Przelicza sekundy na czytelny format (np. "5h 19m")
 fun formatTimeSpent(seconds: Double?): String {
@@ -487,7 +520,7 @@ fun MainScreen(
     val tasksList by viewModel.tasksList.collectAsState()
 
     var expanded by remember { mutableStateOf(false) }
-    val filterOptions = listOf("Pobieranie tasków", "Wszystkie aktywne", "Surowe")
+    val filterOptions = listOf("Pobieranie tasków", "Wszystkie aktywne")
 
     Column(
         modifier = modifier.fillMaxSize(),
@@ -523,44 +556,25 @@ fun MainScreen(
         }
 
         // DODANO: Logika wyświetlania danych
-        if (currentFilter == "Surowe") {
-            // Pokazujemy surowy JSON tylko dla tego trybu
-            Text(
-                text = tasksText,
-                modifier = Modifier
-                    .padding(16.dp)
-                    .verticalScroll(rememberScrollState())
+//        if (currentFilter == "Surowe") {
+//            // Pokazujemy surowy JSON tylko dla tego trybu
+//            Text(
+//                text = tasksText,
+//                modifier = Modifier
+//                    .padding(16.dp)
+//                    .verticalScroll(rememberScrollState())
+//            )
+//        } else {
+            // Czysto i elegancko wstrzykujemy wyizolowany komponent
+            TaskListWithFab(
+                tasksList = tasksList,
+                navController = navController,
+                viewModel = viewModel
             )
-        } else {
-            // Pokazujemy ładną listę kafelków
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp)
-            ) {
-                items(tasksList) { task ->
-                    TaskCard(task = task, onClick = {
-                        if (task.id != null) {
-                            navController.navigate("taskDetail/${task.id}")
-                        } else {
-                            viewModel._statusText.value = "To zadanie nie ma ID!"
-                        }
-                    })
-                }
-            }
-        }
+        //}
     }
 }
 
-fun getFullAvatarUrl(iconPath: String?): String {
-    if (iconPath.isNullOrEmpty()) return ""
-    // Zmień "https://twojadomena.bitrix24.pl" na swój właściwy adres
-    return if (iconPath.startsWith("/")) {
-        "https://jenaeuropa.bitrix24.pl$iconPath"
-    } else {
-        iconPath
-    }
-}
 
 // DODANO: Nowy komponent - pojedynczy kafelek zadania
 // Zaktualizowany komponent - pojedynczy kafelek zadania
@@ -708,6 +722,66 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
 }
 
 @Composable
+fun TaskListWithFab(
+    tasksList: List<BitrixTask>,
+    navController: NavController,
+    viewModel: BitrixViewModel
+) {
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+
+    val showScrollToTop by remember {
+        derivedStateOf { listState.firstVisibleItemIndex > 2 }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp)
+        ) {
+            items(tasksList) { task ->
+                TaskCard(task = task, onClick = {
+                    if (task.id != null) {
+                        navController.navigate("taskDetail/${task.id}")
+                    } else {
+                        viewModel._statusText.value = "To zadanie nie ma ID!"
+                    }
+                })
+            }
+        }
+
+        // Tutaj kompilator bez problemu użyje standardowego AnimatedVisibility,
+        // bo nie jest uwięziony wewnątrz ColumnScope.
+        AnimatedVisibility(
+            visible = showScrollToTop,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+        ) {
+            FloatingActionButton(
+                onClick = {
+                    coroutineScope.launch {
+                        listState.animateScrollToItem(0)
+                    }
+                },
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowUp,
+                    contentDescription = "Wróć na górę"
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 fun TaskDetailScreen(
     taskId: String,
     navController: NavController,
@@ -720,169 +794,260 @@ fun TaskDetailScreen(
     val task by viewModel.selectedTask.collectAsState()
     val statusText by viewModel.statusText.collectAsState()
 
-    // DODANO: Pobieranie listy wiadomości
     val chatMessages by viewModel.chatMessages.collectAsState()
     val usersMap by viewModel.usersMap.collectAsState()
-
     val timeSummaries by viewModel.timeSummaries.collectAsState()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            // DODANO: Scrollowanie dla całego ekranu, żeby czat się zmieścił
-            .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Top
-    ) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-            Button(onClick = { navController.popBackStack() }) {
-                Text("< Wróć")
-            }
-        }
+    var showBottomSheet by remember { mutableStateOf(false) }
+    var messageText by remember { mutableStateOf("") }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val coroutineScope = rememberCoroutineScope()
 
-        Spacer(modifier = Modifier.height(16.dp))
+    // Zawijamy cały ekran w Box, aby móc umieścić pływające przyciski nad treścią
+    Box(modifier = Modifier.fillMaxSize()) {
 
-        if (task == null) {
-            CircularProgressIndicator()
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(text = statusText)
-        } else {
-            Text(
-                text = task?.title ?: "Brak nazwy",
-                style = MaterialTheme.typography.headlineMedium
-            )
-            Spacer(modifier = Modifier.height(16.dp))
+        // Główna, przewijana zawartość
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Top
+        ) {
+            // Puste miejsce na samej górze, aby przycisk "Wróć" nie zasłaniał tytułu
+            Spacer(modifier = Modifier.height(72.dp))
 
-            // PRZYWRÓCONO: Karta ze szczegółami zadania
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("ID: ${task?.id}", style = MaterialTheme.typography.bodyMedium)
-                    Text("Status: ${task?.status}", style = MaterialTheme.typography.bodyMedium)
-                    Text("Czas pracy: ${formatTimeSpent(task?.timeSpent)}", style = MaterialTheme.typography.bodyMedium)
-                    Text("Deadline: ${formatBitrixDate(task?.deadline)}", style = MaterialTheme.typography.bodyMedium)
-                    Text("Utworzono: ${formatBitrixDate(task?.createdAt)}", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-
-            // Karta z osobami przypisanymi
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    UserProfileRow(user = task?.creator, roleLabel = "Zleceniodawca")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    UserProfileRow(user = task?.responsible, roleLabel = "Odpowiedzialny")
-
-                    // DODANE: Wywołanie listy uczestników
-                    AccomplicesRow(accomplices = task?.accomplicesData)
-                }
-            }
-
-            if (timeSummaries.isNotEmpty() || (task?.timeSpent != null && task!!.timeSpent!! > 0.0)) {
-                TimeTrackerSection(
-                    summaries = timeSummaries,
-                    baseTaskTime = task?.timeSpent // Zależnie czy logi pokrywają się z task.timeSpent, w Bitrixie często timeSpent w zadaniu to podsumowanie
-                )
-            }
-
-            // Opis
-            if (!task?.description.isNullOrEmpty()) {
-                ExpandableDescription(description = task!!.description!!)
+            if (task == null) {
+                CircularProgressIndicator()
                 Spacer(modifier = Modifier.height(16.dp))
-            }
-
-            if (chatMessages.isNotEmpty()) {
-                Divider(modifier = Modifier.padding(vertical = 16.dp))
+                Text(text = statusText)
+            } else {
                 Text(
-                    text = "Czat zadania (${chatMessages.size} wiadomości)",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.align(Alignment.Start)
+                    text = task?.title ?: "Brak nazwy",
+                    style = MaterialTheme.typography.headlineMedium
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                // Wyświetlanie wiadomości
-                chatMessages.forEach { message ->
+                // Karta ze szczegółami zadania
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("ID: ${task?.id}", style = MaterialTheme.typography.bodyMedium)
+                        Text("Status: ${task?.status}", style = MaterialTheme.typography.bodyMedium)
+                        Text("Czas pracy: ${formatTimeSpent(task?.timeSpent)}", style = MaterialTheme.typography.bodyMedium)
+                        Text("Deadline: ${formatBitrixDate(task?.deadline)}", style = MaterialTheme.typography.bodyMedium)
+                        Text("Utworzono: ${formatBitrixDate(task?.createdAt)}", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
 
-                    // Rozpoznawanie wiadomości systemowych
-                    val isSystem = message.authorId == "0"
+                // Karta z osobami przypisanymi
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        UserProfileRow(user = task?.creator, roleLabel = "Zleceniodawca")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        UserProfileRow(user = task?.responsible, roleLabel = "Odpowiedzialny")
 
-                    val authorProfile = usersMap[message.authorId]
-                    val authorName = if (isSystem) "System" else (authorProfile?.name ?: "Nieznany ID: ${message.authorId}")
-                    val avatarUrl = if (isSystem) "" else getFullAvatarUrl(authorProfile?.photoUrl)
-                    val messageDate = formatBitrixDate(message.date)
+                        AccomplicesRow(accomplices = task?.accomplicesData)
+                    }
+                }
 
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        // Delikatnie inny kolor dla wiadomości systemowych
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isSystem) androidx.compose.ui.graphics.Color(0xFFFFF9C4) else androidx.compose.ui.graphics.Color(0xFFF0F0F0)
-                        )
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (avatarUrl.isNotEmpty()) {
-                                        AsyncImage(
-                                            model = avatarUrl,
-                                            contentDescription = "Avatar",
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier
-                                                .size(24.dp)
-                                                .clip(CircleShape)
+                // Raport czasu
+                if (timeSummaries.isNotEmpty() || (task?.timeSpent != null && task!!.timeSpent!! > 0.0)) {
+                    TimeTrackerSection(
+                        summaries = timeSummaries,
+                        baseTaskTime = task?.timeSpent
+                    )
+                }
+
+                // Opis
+                if (!task?.description.isNullOrEmpty()) {
+                    ExpandableDescription(description = task!!.description!!)
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                // Czat
+                if (chatMessages.isNotEmpty()) {
+                    Divider(modifier = Modifier.padding(vertical = 16.dp))
+                    Text(
+                        text = "Czat zadania (${chatMessages.size} wiadomości)",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.align(Alignment.Start)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    chatMessages.forEach { message ->
+                        val isSystem = message.authorId == "0"
+                        val authorProfile = usersMap[message.authorId]
+                        val authorName = if (isSystem) "System" else (authorProfile?.name ?: "Nieznany ID: ${message.authorId}")
+                        val avatarUrl = if (isSystem) "" else getFullAvatarUrl(authorProfile?.photoUrl)
+                        val messageDate = formatBitrixDate(message.date)
+
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSystem) androidx.compose.ui.graphics.Color(0xFFFFF9C4) else androidx.compose.ui.graphics.Color(0xFFF0F0F0)
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (avatarUrl.isNotEmpty()) {
+                                            AsyncImage(
+                                                model = avatarUrl,
+                                                contentDescription = "Avatar",
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .size(24.dp)
+                                                    .clip(CircleShape)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                        } else if (!isSystem) {
+                                            Icon(
+                                                imageVector = Icons.Default.Person,
+                                                contentDescription = "Brak avatara",
+                                                modifier = Modifier.size(24.dp).clip(CircleShape),
+                                                tint = androidx.compose.ui.graphics.Color.Gray
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                        }
+
+                                        Text(
+                                            text = authorName,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = if (isSystem) androidx.compose.ui.graphics.Color.DarkGray else androidx.compose.ui.graphics.Color.Black
                                         )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                    } else if (!isSystem) {
-                                        Icon(
-                                            imageVector = Icons.Default.Person, // Zmień na ikonę profilu np. Icons.Default.Person
-                                            contentDescription = "Brak avatara",
-                                            modifier = Modifier.size(24.dp).clip(CircleShape),
-                                            tint = androidx.compose.ui.graphics.Color.Gray
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
                                     }
 
-                                    // Nazwa autora
                                     Text(
-                                        text = authorName,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = if (isSystem) androidx.compose.ui.graphics.Color.DarkGray else androidx.compose.ui.graphics.Color.Black
+                                        text = messageDate,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = androidx.compose.ui.graphics.Color.Gray
                                     )
                                 }
 
-                                // Znacznik czasu na prawo
+                                Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = messageDate,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = androidx.compose.ui.graphics.Color.Gray
+                                    text = message.text ?: "[Brak tekstu]",
+                                    style = if (isSystem) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+                                    fontStyle = if (isSystem) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal
                                 )
                             }
+                        }
+                    }
+                } else if (task?.chatId != null || task?.chatIdAlt != null) {
+                    Text("Trwa pobieranie wiadomości...", style = MaterialTheme.typography.bodySmall)
+                }
 
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = message.text ?: "[Brak tekstu]",
-                                style = if (isSystem) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
-                                fontStyle = if (isSystem) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(text = statusText, style = MaterialTheme.typography.bodySmall)
+
+                // Dodatkowe puste miejsce na dole, by przycisk "+" nie przysłonił czatu
+                Spacer(modifier = Modifier.height(88.dp))
+            }
+        }
+
+        FloatingActionButton(
+            onClick = { navController.popBackStack() },
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(16.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceVariant, // Delikatniejszy kolor
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+        ) {
+            Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Wróć")
+        }
+
+
+        if (task != null && (task?.chatId != null || task?.chatIdAlt != null)) {
+            FloatingActionButton(
+                onClick = { showBottomSheet = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp),
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ) {
+                Icon(imageVector = Icons.Default.Add, contentDescription = "Dodaj wiadomość")
+            }
+        }
+
+        if (showBottomSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showBottomSheet = false },
+                sheetState = sheetState,
+                // Upewnia się, że klawiatura ładnie przesuwa okienko do góry
+                //windowInsets = WindowInsets.ime
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 16.dp)
+                        .navigationBarsPadding()
+                        .imePadding()
+                ) {
+                    Text(
+                        text = "Nowa wiadomość",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = messageText,
+                            onValueChange = { messageText = it },
+                            modifier = Modifier.weight(1f),
+                            placeholder = { Text("Wpisz treść...") },
+                            maxLines = 4 // Pozwala na wpisanie dłuższego tekstu przed włączeniem scrolla
+                        )
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        // Przycisk wysyłania okrągły
+                        IconButton(
+                            onClick = {
+                                val chatId = task?.chatId ?: task?.chatIdAlt
+                                if (chatId != null && messageText.isNotBlank()) {
+                                    // 1. Wysyłamy wiadomość
+                                    viewModel.sendMessage(taskId, chatId, messageText)
+                                    // 2. Czyścimy pole
+                                    messageText = ""
+                                    // 3. Chowamy okienko z animacją
+                                    coroutineScope.launch { sheetState.hide() }.invokeOnCompletion {
+                                        if (!sheetState.isVisible) {
+                                            showBottomSheet = false
+                                        }
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                .size(48.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Send,
+                                contentDescription = "Wyślij",
+                                tint = MaterialTheme.colorScheme.onPrimary
                             )
                         }
                     }
                 }
-            } else if (task?.chatId != null || task?.chatIdAlt != null) {
-                Text("Trwa pobieranie wiadomości...", style = MaterialTheme.typography.bodySmall)
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(text = statusText, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -993,6 +1158,28 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
                 _tasksList.value = tasks
             } catch (e: Exception) {
                 // Obsługa błędu, jeśli JSON w cache nie pasuje do modelu
+            }
+        }
+    }
+
+    fun sendMessage(taskId: String, chatId: Int, text: String) {
+        if (text.isBlank()) return
+
+        _statusText.value = "Wysyłanie wiadomości..."
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val text = "Użytkownik Marek przekazuje: \n" + text
+                var finalchat = "chat" + chatId
+                //It is possible to send message as someone else when changed system to N and provide different webhook url
+                RetrofitClient.api.sendMessage(finalchat, text, "Y")
+
+                delay(1000) // Symulacja opóźnienia sieci
+                _statusText.value = "Wiadomość wysłana!"
+
+                // Odświeżamy zadanie, żeby pobrać nową wiadomość z serwera
+                fetchTaskDetails(taskId)
+            } catch (e: Exception) {
+                _statusText.value = "Błąd wysyłania: ${e.message}"
             }
         }
     }
@@ -1113,7 +1300,7 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
         // POPRAWIONO: Wywołanie odpowiedniej funkcji na podstawie wybranego filtra
         when (_currentFilter.value) {
             "Wszystkie aktywne" -> fetchInProgressTasks(isAuto)
-            "Surowe" -> fetchStandardTasksRaw(isAuto)
+            //"Surowe" -> fetchStandardTasksRaw(isAuto)
             else -> fetchStandardTasks(isAuto) // Domyślnie "Pobieranie tasków"
         }
     }
@@ -1221,7 +1408,6 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
                 stringBuilder.append("Aktywność: ${task.activity}\n")
                 stringBuilder.append("Utworzono: ${task.createdAt}\n")
                 stringBuilder.append("Odpowiedzialny: ${task.responsible}\n")
-                //stringBuilder.append("Uczestnicy: ${task.accomplices}\n")
                 stringBuilder.append("----------------------------\n")
             }
 
@@ -1240,40 +1426,40 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private suspend fun fetchStandardTasksRaw(isAuto: Boolean) {
-        try {
-            // Najpierw próbujemy pokazać dane z cache, żeby użytkownik nie czekał
-            val cachedData = cacheManager.readJson()
-            if (cachedData != null && _tasksText.value.isEmpty()) {
-                _statusText.value = "Wyświetlam dane z pamięci podręcznej..."
-                _tasksText.value = cachedData
-            }
-
-            // Pobieramy świeże dane z webhooka
-            _statusText.value = "Pobieranie świeżych danych..."
-            val response = RetrofitClient.api.getTasksRaw()
-            val json = response.string()
-
-            // Zapisujemy nowy JSON do pliku (nadpisujemy stary)
-            cacheManager.saveJson(json)
-
-            _statusText.value = "Pobrano i zapisano dane!"
-            _tasksText.value = json
-
-        } catch (e: Exception) {
-            // Jeśli nie ma internetu, a mamy cache, poinformuj o tym
-            val cachedData = cacheManager.readJson()
-            if (cachedData != null) {
-                _statusText.value = "Brak sieci. Pokazuję ostatnio zapisane dane."
-                _tasksText.value = cachedData
-            } else {
-                _statusText.value = "Błąd komunikacji z Bitrixem i brak danych w cache."
-                _tasksText.value = "Wyjątek: ${e.javaClass.simpleName}\nTreść: ${e.message}"
-            }
-        } finally {
-            _isFetching.value = false
-        }
-    }
+//    private suspend fun fetchStandardTasksRaw(isAuto: Boolean) {
+//        try {
+//            // Najpierw próbujemy pokazać dane z cache, żeby użytkownik nie czekał
+//            val cachedData = cacheManager.readJson()
+//            if (cachedData != null && _tasksText.value.isEmpty()) {
+//                _statusText.value = "Wyświetlam dane z pamięci podręcznej..."
+//                _tasksText.value = cachedData
+//            }
+//
+//            // Pobieramy świeże dane z webhooka
+//            _statusText.value = "Pobieranie świeżych danych..."
+//            val response = RetrofitClient.api.getTasksRaw()
+//            val json = response.string()
+//
+//            // Zapisujemy nowy JSON do pliku (nadpisujemy stary)
+//            cacheManager.saveJson(json)
+//
+//            _statusText.value = "Pobrano i zapisano dane!"
+//            _tasksText.value = json
+//
+//        } catch (e: Exception) {
+//            // Jeśli nie ma internetu, a mamy cache, poinformuj o tym
+//            val cachedData = cacheManager.readJson()
+//            if (cachedData != null) {
+//                _statusText.value = "Brak sieci. Pokazuję ostatnio zapisane dane."
+//                _tasksText.value = cachedData
+//            } else {
+//                _statusText.value = "Błąd komunikacji z Bitrixem i brak danych w cache."
+//                _tasksText.value = "Wyjątek: ${e.javaClass.simpleName}\nTreść: ${e.message}"
+//            }
+//        } finally {
+//            _isFetching.value = false
+//        }
+//    }
 
     private suspend fun bgFetchAllGroups(isAuto: Boolean) {
         delay(2000)
