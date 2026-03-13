@@ -9,6 +9,17 @@ class JsonUtil (private val context: Context) {
         if (!exists()) mkdirs() // Tworzy folder, jeśli nie istnieje
     }
 
+    fun saveTaskList(key: String, jsonString: String) {
+        val file = File(context.filesDir, "tasks_${key}.json")
+        file.writeText(jsonString)
+    }
+
+    // ZMIENIONE: Odczytuje listę zapisaną pod danym kluczem
+    fun readTaskList(key: String): String? {
+        val file = File(context.filesDir, "tasks_${key}.json")
+        return if (file.exists()) file.readText() else null
+    }
+
     // Zapisuje surowy JSON, nadpisując stary plik
     fun saveJson(jsonString: String) {
         val file = File(context.filesDir, fileName)

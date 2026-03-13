@@ -513,14 +513,16 @@ fun MainScreen(
     val isFetching by viewModel.isFetching.collectAsState()
     val statusText by viewModel.statusText.collectAsState()
     val tasksText by viewModel.tasksText.collectAsState()
-    val currentMode by viewModel.currentMode.collectAsState()
     val currentFilter by viewModel.currentFilter.collectAsState()
-
-    // DODANO: Pobieramy listę tasków z ViewModelu
     val tasksList by viewModel.tasksList.collectAsState()
 
+    // DODANO: Stany dla nowego filtra użytkowników
+    val usersMap by viewModel.usersMap.collectAsState()
+    val selectedUserId by viewModel.selectedUserId.collectAsState()
+
     var expanded by remember { mutableStateOf(false) }
-    val filterOptions = listOf("Pobieranie tasków", "Wszystkie aktywne")
+    // DODANO: Nowy tryb do listy
+    val filterOptions = listOf("Pobieranie tasków", "Wszystkie aktywne", "Wybrany użytkownik")
 
     Column(
         modifier = modifier.fillMaxSize(),
@@ -533,6 +535,7 @@ fun MainScreen(
             Text(text = statusText)
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Pierwszy Dropdown - Wybór trybu
             Box {
                 Button(onClick = { expanded = true }, enabled = !isFetching) {
                     Text(text = "Tryb testowy: $currentFilter")
@@ -549,29 +552,57 @@ fun MainScreen(
                     }
                 }
             }
+
             Spacer(modifier = Modifier.height(8.dp))
+
+            // Drugi Dropdown - Wybór użytkownika (widoczny tylko w konkretnym trybie)
+            if (currentFilter == "Wybrany użytkownik") {
+                var userExpanded by remember { mutableStateOf(false) }
+                val selectedUserName = usersMap[selectedUserId]?.name ?: "Wybierz pracownika z listy"
+
+                Box {
+                    Button(
+                        onClick = { userExpanded = true },
+                        enabled = !isFetching,
+                        // Delikatnie inny kolor dla odróżnienia
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary
+                        )
+                    ) {
+                        Text(text = "👤 $selectedUserName")
+                    }
+                    // Ograniczamy wysokość listy, żeby przy 100 użytkownikach nie uciekła z ekranu
+                    DropdownMenu(
+                        expanded = userExpanded,
+                        onDismissRequest = { userExpanded = false },
+                        modifier = Modifier.height(300.dp)
+                    ) {
+                        // Sortujemy mapę alfabetycznie po imieniu
+                        usersMap.entries.sortedBy { it.value.name }.forEach { (id, profile) ->
+                            DropdownMenuItem(
+                                text = { Text(profile.name) },
+                                onClick = {
+                                    viewModel.setSelectedUserId(id)
+                                    userExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
             Button(onClick = { viewModel.fetchData(isAuto = false) }, enabled = !isFetching) {
                 Text(text = "Pobierz ręcznie")
             }
         }
 
-        // DODANO: Logika wyświetlania danych
-//        if (currentFilter == "Surowe") {
-//            // Pokazujemy surowy JSON tylko dla tego trybu
-//            Text(
-//                text = tasksText,
-//                modifier = Modifier
-//                    .padding(16.dp)
-//                    .verticalScroll(rememberScrollState())
-//            )
-//        } else {
-            // Czysto i elegancko wstrzykujemy wyizolowany komponent
-            TaskListWithFab(
-                tasksList = tasksList,
-                navController = navController,
-                viewModel = viewModel
-            )
-        //}
+        // Reszta kodu pozostaje bez zmian
+        TaskListWithFab(
+            tasksList = tasksList,
+            navController = navController,
+            viewModel = viewModel
+        )
     }
 }
 
@@ -1080,6 +1111,10 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
     private val _currentFilter = MutableStateFlow("Pobieranie tasków")
     val currentFilter: StateFlow<String> = _currentFilter.asStateFlow()
 
+    private val _selectedUserId = MutableStateFlow<String?>(null)
+    val selectedUserId: StateFlow<String?> = _selectedUserId.asStateFlow()
+
+
     private val _tasksList = MutableStateFlow<List<BitrixTask>>(emptyList())
 
     val tasksList: StateFlow<List<BitrixTask>> = _tasksList.asStateFlow()
@@ -1094,8 +1129,17 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
         loadAllUsers()
     }
 
+    fun setSelectedUserId(id: String) {
+        _selectedUserId.value = id
+    }
+
     fun setFilter(newFilter: String) {
         _currentFilter.value = newFilter
+
+        loadListFromCache(getCacheKeyForFilter(newFilter))
+
+        // Automatycznie pobierz świeże dane po zmianie filtra
+        fetchData()
     }
 
     private fun loadAllUsers() {
@@ -1117,7 +1161,7 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
 
             try {
                 while (true) {
-                    val response = RetrofitClient.api.getUsers(start = start)
+                    val response = RetrofitClient.api.getUsers(true, start = start)
                     val usersBatch = response.result ?: break
 
                     for (u in usersBatch) {
@@ -1146,19 +1190,37 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun checkJson() {
-        val cachedData = cacheManager.readJson()
-        if (cachedData != null && _tasksList.value.isEmpty()) {
-            _statusText.value = "Wyświetlam dane z pamięci podręcznej..."
-            _tasksText.value = cachedData // Zostawiamy dla trybu "Surowe"
+        // Ładujemy dane dla początkowego filtra
+        loadListFromCache(getCacheKeyForFilter(_currentFilter.value))
+    }
 
-            // DODANO: Zamiana zapisanego JSONa z powrotem na listę obiektów
+    // DODANO: Pomocnicza funkcja mapująca nazwę filtra na nazwę pliku w cache
+    private fun getCacheKeyForFilter(filterName: String): String {
+        return when (filterName) {
+            "Wszystkie aktywne" -> "active_tasks"
+            "Wybrany użytkownik" -> "user_tasks_${_selectedUserId.value ?: "none"}"
+            else -> "all_tasks"
+        }
+    }
+
+    // DODANO: Pomocnicza funkcja wyciągnięta z checkJson
+    private fun loadListFromCache(cacheKey: String) {
+        val cachedData = cacheManager.readTaskList(cacheKey)
+        if (cachedData != null) {
+            _statusText.value = "Wyświetlam dane z pamięci podręcznej..."
+            _tasksText.value = cachedData
+
             try {
                 val listType = object : TypeToken<List<BitrixTask>>() {}.type
                 val tasks: List<BitrixTask> = Gson().fromJson(cachedData, listType)
                 _tasksList.value = tasks
             } catch (e: Exception) {
-                // Obsługa błędu, jeśli JSON w cache nie pasuje do modelu
+                // Obsługa błędu parsowania JSON
             }
+        } else {
+            // Jeśli nie ma cache dla tego trybu, czyścimy listę na ekranie
+            _tasksList.value = emptyList()
+            _statusText.value = "Brak danych w pamięci podręcznej."
         }
     }
 
@@ -1168,10 +1230,10 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
         _statusText.value = "Wysyłanie wiadomości..."
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val text = "Użytkownik Marek przekazuje: \n" + text
+                //val text = "Użytkownik Marek przekazuje: \n" + text
                 var finalchat = "chat" + chatId
                 //It is possible to send message as someone else when changed system to N and provide different webhook url
-                RetrofitClient.api.sendMessage(finalchat, text, "Y")
+                RetrofitClient.api.sendMessage(finalchat, text, "N")
 
                 delay(1000) // Symulacja opóźnienia sieci
                 _statusText.value = "Wiadomość wysłana!"
@@ -1297,22 +1359,78 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
 
 
     private suspend fun bgFetchAllTasks(isAuto: Boolean) {
-        // POPRAWIONO: Wywołanie odpowiedniej funkcji na podstawie wybranego filtra
         when (_currentFilter.value) {
             "Wszystkie aktywne" -> fetchInProgressTasks(isAuto)
-            //"Surowe" -> fetchStandardTasksRaw(isAuto)
+            "Wybrany użytkownik" -> {
+                val uid = _selectedUserId.value
+                if (uid != null) {
+                    fetchTasksForSpecificUser(uid)
+                } else {
+                    _statusText.value = "Wybierz najpierw użytkownika z listy."
+                    _isFetching.value = false
+                }
+            }
             else -> fetchStandardTasks(isAuto) // Domyślnie "Pobieranie tasków"
         }
     }
 
+    private suspend fun fetchTasksForSpecificUser(userId: String) {
+        val cacheKey = "user_tasks_$userId"
+        try {
+            _statusText.value = "Rozpoczynam wyszukiwanie zadań pracownika..."
+            val allTasks = mutableListOf<BitrixTask>()
+            var start = 0
+
+            // Cofamy się np. o 30 dni, żeby nie pobierać całej historii firmy
+            val dateStr = LocalDateTime.now().minusDays(30)
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'00:00:00+01:00"))
+
+            while (true) {
+                val response = RetrofitClient.api.getTasksForUser(
+                    start = start,
+                    creatorId = userId,
+                    responsibleId = userId,
+                    accompliceId = userId,
+                    activityDate = dateStr
+                )
+
+                val tasksBatch = response.result.tasks
+                if (tasksBatch.isEmpty()) break
+
+                allTasks.addAll(tasksBatch)
+                _statusText.value = "Pobrano ${allTasks.size} zadań pracownika..."
+
+                val next = response.next
+                if (next != null) {
+                    start = next
+                } else {
+                    break
+                }
+            }
+
+            _statusText.value = "Znaleziono ${allTasks.size} zadań dla tego użytkownika."
+            _tasksList.value = allTasks.reversed()
+
+            val finalJson = Gson().toJson(_tasksList.value)
+            cacheManager.saveTaskList(cacheKey, finalJson)
+
+        } catch (e: Exception) {
+            _statusText.value = "Brak sieci. Ładuję kopię lokalną..."
+            loadListFromCache(cacheKey)
+        } finally {
+            _isFetching.value = false
+        }
+    }
+
     private suspend fun fetchInProgressTasks(isAuto: Boolean) {
+        val cacheKey = "active_tasks"
         try {
             _statusText.value = "Rozpoczynam pobieranie zadań 'W trakcie'..."
 
             val allTasks = mutableListOf<BitrixTask>()
             var start = 0
 
-            val dateStr = LocalDateTime.now().minusDays(7)
+            val dateStr = LocalDateTime.now().minusDays(14)
                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'00:00:00+01:00"))
 
             while (true) {
@@ -1340,8 +1458,8 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
 
-            val finalJson = Gson().toJson(allTasks)
-            cacheManager.saveJson(finalJson)
+            val finalJson = Gson().toJson(_tasksList.value)
+            cacheManager.saveTaskList(cacheKey, finalJson)
 
             _statusText.value = "Zakończono pobieranie! Razem: ${allTasks.size} zadań."
             _tasksText.value = finalJson
@@ -1349,7 +1467,8 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
             _tasksList.value = allTasks.reversed()
 
         } catch (e: Exception) {
-            _statusText.value = "Błąd komunikacji z API"
+            _statusText.value = "Brak sieci. Ładuję kopię lokalną..."
+            loadListFromCache(cacheKey)
             _tasksText.value = "Wyjątek: ${e.javaClass.simpleName}\nTreść: ${e.message}"
         } finally {
             _isFetching.value = false
@@ -1357,6 +1476,7 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun fetchStandardTasks(isAuto: Boolean) {
+        val cacheKey = "all_tasks" // Klucz dla tego trybu
         try {
             _statusText.value = "Rozpoczynam pobieranie wszystkich zadań..."
 
@@ -1415,12 +1535,13 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
             _tasksText.value = stringBuilder.toString()
 
             // Cache zapisze listę już w odwróconej, poprawnej kolejności
-            val fetchedTasks = Gson().toJson(allTasks)
-            cacheManager.saveJson(fetchedTasks)
+            val finalJson = Gson().toJson(allTasks)
+            cacheManager.saveTaskList(cacheKey, finalJson)
 
         } catch (e: Exception) {
-            _statusText.value = "Błąd pobierania"
+            _statusText.value = "Brak sieci. Ładuję kopię lokalną..."
             _tasksText.value = "Wyjątek: ${e.javaClass.simpleName}\nTreść: ${e.message}"
+            loadListFromCache(cacheKey)
         } finally {
             _isFetching.value = false
         }

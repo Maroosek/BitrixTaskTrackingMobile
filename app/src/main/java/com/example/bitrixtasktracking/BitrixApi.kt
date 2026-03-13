@@ -22,6 +22,9 @@ interface BitrixApi {
 //    @GET("tasks.task.list.json?start=1100")
 //    suspend fun getTasksRaw(): ResponseBody
 
+//    @GET("tasks.task.get")
+//    suspend fun getTaskDetails(@Query("taskId") taskId: String): SingleTaskResponse
+
     @GET("im.dialog.messages.get")
     suspend fun getChatMessages(
         @Query("DIALOG_ID") dialogId: String,
@@ -32,9 +35,6 @@ interface BitrixApi {
     @GET("tasks.task.get")
     suspend fun getTaskDetailsRaw(@Query("taskId") taskId: String): ResponseBody
 
-//    @GET("tasks.task.get")
-//    suspend fun getTaskDetails(@Query("taskId") taskId: String): SingleTaskResponse
-
     @POST("im.message.add")
     suspend fun sendMessage(
         @Query("DIALOG_ID") chatId: String,
@@ -42,6 +42,20 @@ interface BitrixApi {
         @Query("SYSTEM") system: String,
     )
 
+    @GET("tasks.task.list.json")
+    suspend fun getTasksForUser(
+        @Query("start") start: Int = 0,
+        // Grupa filtrów z logiką OR (użytkownik w dowolnej roli)
+        @Query("filter[0][::LOGIC]") logic: String = "OR",
+        @Query("filter[0][CREATED_BY]") creatorId: String,
+        @Query("filter[0][RESPONSIBLE_ID]") responsibleId: String,
+        @Query("filter[0][ACCOMPLICE]") accompliceId: String,
+        // Filtr daty poza grupą [0], co domyślnie łączy się operatorem AND
+        @Query("filter[>=ACTIVITY_DATE]") activityDate: String? = null
+    ): BitrixResponse
+
     @GET("user.get.json")
-    suspend fun getUsers(@Query("start") start: Int = 0): UsersResponse
+    suspend fun getUsers(
+        @Query("ACTIVE") active: Boolean,
+        @Query("start") start: Int = 0): UsersResponse
 }
