@@ -63,11 +63,9 @@ import androidx.navigation.navArgument
 import androidx.navigation.NavController
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.draw.clip
@@ -75,6 +73,13 @@ import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 
 import java.time.ZonedDateTime
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.clickable
 
 
 // Reprezentuje pojedyncze zadanie z Bitrixa
@@ -107,7 +112,9 @@ data class BitrixTask(
     @SerializedName("chatId") val chatId: Int?, // Zmiana na Int
     @SerializedName("chat_Id") val chatIdAlt: Int?, // Zmiana na Int
     @SerializedName("creator") val creator: BitrixUser?,
-    @SerializedName("responsible") val responsible: BitrixUser?
+    @SerializedName("responsible") val responsible: BitrixUser?,
+    @SerializedName("accomplicesData") val accomplicesData: Map<String, BitrixUser>?
+
 )
 
 data class BitrixUser(
@@ -143,6 +150,31 @@ data class BitrixGlobalUser(
     @SerializedName("LAST_NAME") val lastName: String?,
     @SerializedName("PERSONAL_PHOTO") val photo: String?
 )
+
+// Klasa pomocnicza do budowania sesji
+data class TrackerSession(
+    val start: ZonedDateTime,
+    var stop: ZonedDateTime? = null
+)
+
+// Model danych dla pojedynczego użytkownika
+data class UserTimeSummary(
+    val userName: String,
+    val totalSeconds: Double,
+    val todaySeconds: Double,
+    val isActive: Boolean,
+    val activeStartDt: ZonedDateTime?
+)
+
+// Formatyzer czasu na żywo (np. 01:25:10)
+fun formatTimeSpentLive(seconds: Double?): String {
+    if (seconds == null || seconds <= 0.0) return "00:00:00"
+    val totalSeconds = seconds.toLong()
+    val h = totalSeconds / 3600
+    val m = (totalSeconds % 3600) / 60
+    val s = totalSeconds % 60
+    return String.format("%02d:%02d:%02d", h, m, s)
+}
 
 data class UserProfile(
     val name: String,
@@ -204,6 +236,97 @@ fun formatTimeSpent(seconds: Double?): String {
     return if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
 }
 
+private fun calculateTimeSummaries(messages: List<ChatMessage>): List<UserTimeSummary> {
+    val userSessions = mutableMapOf<String, MutableList<TrackerSession>>()
+    val openStarts = mutableMapOf<String, ZonedDateTime>()
+
+    val startRegex = Regex("\\[USER=\\d+\\](.*?)\\[/USER\\]\\s+włączył[a]?\\s+śledzenie\\s+czasu", RegexOption.IGNORE_CASE)
+    val stopRegex = Regex("\\[USER=\\d+\\](.*?)\\[/USER\\]\\s+wyłączył[a]?\\s+śledzenie\\s+czasu", RegexOption.IGNORE_CASE)
+    val finishRegex = Regex("(ukończył|zakończył)[a]?\\s+zadanie", RegexOption.IGNORE_CASE)
+
+    val todayDate = ZonedDateTime.now().toLocalDate()
+
+    // Przetwarzanie od najstarszych do najnowszych wiadomości
+    for (msg in messages.reversed()) {
+        val text = msg.text ?: continue
+        val rawDate = msg.date ?: continue
+
+        val dt = try {
+            ZonedDateTime.parse(rawDate)
+        } catch (e: Exception) { continue }
+
+        val startMatch = startRegex.find(text)
+        val stopMatch = stopRegex.find(text)
+        val finishMatch = finishRegex.find(text)
+
+        when {
+            startMatch != null -> {
+                val user = startMatch.groupValues[1].trim()
+                openStarts[user] = dt
+                userSessions.getOrPut(user) { mutableListOf() }.add(TrackerSession(dt))
+            }
+            stopMatch != null -> {
+                val user = stopMatch.groupValues[1].trim()
+                val sessions = userSessions[user] ?: continue
+                for (sess in sessions.reversed()) {
+                    if (sess.stop == null) {
+                        sess.stop = dt
+                        break
+                    }
+                }
+                openStarts.remove(user)
+            }
+            finishMatch != null -> {
+                for (user in openStarts.keys.toList()) {
+                    val sessions = userSessions[user] ?: continue
+                    for (sess in sessions.reversed()) {
+                        if (sess.stop == null) {
+                            sess.stop = dt
+                            break
+                        }
+                    }
+                }
+                openStarts.clear()
+            }
+        }
+    }
+
+    val summaries = mutableListOf<UserTimeSummary>()
+    for ((user, sessions) in userSessions) {
+        if (sessions.isEmpty()) continue
+
+        var totalElapsed = 0.0
+        var todayElapsed = 0.0
+        var isActive = false
+        var activeStart: ZonedDateTime? = null
+
+        for (sess in sessions) {
+            if (sess.stop == null) {
+                isActive = true
+                activeStart = sess.start
+            } else {
+                val elapsed = java.time.Duration.between(sess.start, sess.stop).seconds.toDouble()
+                totalElapsed += maxOf(0.0, elapsed)
+
+                if (sess.start.toLocalDate() == todayDate || sess.stop!!.toLocalDate() == todayDate) {
+                    todayElapsed += maxOf(0.0, elapsed)
+                }
+            }
+        }
+
+        summaries.add(
+            UserTimeSummary(
+                userName = user,
+                totalSeconds = totalElapsed,
+                todaySeconds = todayElapsed,
+                isActive = isActive,
+                activeStartDt = activeStart
+            )
+        )
+    }
+    return summaries
+}
+
 // Formatuje datę ISO z Bitrixa na polski format
 fun formatBitrixDate(dateString: String?): String {
     if (dateString.isNullOrEmpty()) return "Brak daty"
@@ -238,6 +361,111 @@ fun UserProfileRow(user: BitrixUser?, roleLabel: String) {
             Text(text = user.name ?: "Nieznany", style = MaterialTheme.typography.bodyMedium)
             if (!user.workPosition.isNullOrEmpty()) {
                 Text(text = user.workPosition, style = MaterialTheme.typography.bodySmall, color = androidx.compose.ui.graphics.Color.Gray)
+            }
+        }
+    }
+}
+
+@Composable
+fun ExpandableDescription(description: String, maxLinesCollapsed: Int = 7) {
+    var isExpanded by remember { mutableStateOf(false) }
+    var showReadMoreButton by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize() // Płynna animacja rozwijania/zwijania
+    ) {
+        Text(
+            text = "Opis zadania:",
+            style = MaterialTheme.typography.titleMedium
+        )
+        Text(
+            text = description,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = if (isExpanded) Int.MAX_VALUE else maxLinesCollapsed,
+            overflow = TextOverflow.Ellipsis,
+            onTextLayout = { textLayoutResult ->
+                if (textLayoutResult.hasVisualOverflow) {
+                    showReadMoreButton = true
+                }
+            },
+            modifier = Modifier.padding(top = 4.dp)
+        )
+
+        // Pokazujemy przycisk tylko jeśli tekst jest za długi
+        if (showReadMoreButton) {
+            Text(
+                text = if (isExpanded) "Zwiń opis" else "Czytaj dalej...",
+                style = MaterialTheme.typography.labelMedium,
+                color = androidx.compose.ui.graphics.Color(0xFF1565C0), // Ładny niebieski kolor linku
+                modifier = Modifier
+                    .clickable { isExpanded = !isExpanded }
+                    .padding(top = 8.dp, bottom = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun AccomplicesRow(accomplices: Map<String, BitrixUser>?) {
+    // Jeśli lista jest pusta lub null, nic nie rysujemy
+    if (accomplices.isNullOrEmpty()) return
+
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+        Text(
+            text = "Uczestnicy (${accomplices.size}):",
+            style = MaterialTheme.typography.labelMedium,
+            color = androidx.compose.ui.graphics.Color.Gray,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        // Pozioma lista zapobiegająca wydłużaniu ekranu w dół
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(accomplices.values.toList()) { user ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    val avatarUrl = getFullAvatarUrl(user.icon)
+
+                    if (avatarUrl.isNotEmpty() && !avatarUrl.endsWith("default_avatar.png")) {
+                        AsyncImage(
+                            model = avatarUrl,
+                            contentDescription = "Avatar",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                        )
+                    } else {
+                        // Zastępczy, domyślny avatar (zamiast strzałki)
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(androidx.compose.ui.graphics.Color.LightGray),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = "Domyślny avatar",
+                                tint = androidx.compose.ui.graphics.Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Wyświetlamy tylko pierwsze imię/słowo, by oszczędzić miejsce
+                    Text(
+                        text = user.name?.substringBefore(" ") ?: "Nieznany",
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }
@@ -399,6 +627,82 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = androidx.compose.ui.graphics.Color.DarkGray
             )
+//            Text(
+//                text = "Uczestnicy: ${task.accomplices?.name ?: "Nieznany"}",
+//                style = MaterialTheme.typography.bodySmall,
+//                color = androidx.compose.ui.graphics.Color.DarkGray
+//            )
+        }
+    }
+}
+
+@Composable
+fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) {
+    // Odpowiada za cykliczne odświeżanie interfejsu (Live Ticker)
+    var currentTime by remember { mutableStateOf(ZonedDateTime.now()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000)
+            currentTime = ZonedDateTime.now()
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color(0xFFE3F2FD)) // Lekko niebieskie tło jak raport
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("⏱ Raport czasu pracy", style = MaterialTheme.typography.titleMedium)
+            Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+            if (summaries.isEmpty() && (baseTaskTime == null || baseTaskTime <= 0.0)) {
+                Text("Brak historii czasu.", style = MaterialTheme.typography.bodyMedium, color = androidx.compose.ui.graphics.Color.Gray)
+            } else {
+                var totalLiveAdditionalTime = 0.0
+
+                summaries.forEach { summary ->
+                    var displayTotal = summary.totalSeconds
+                    var displayToday = summary.todaySeconds
+
+                    if (summary.isActive && summary.activeStartDt != null) {
+                        val activeElapsed = java.time.Duration.between(summary.activeStartDt, currentTime).seconds.toDouble()
+                        val elapsedToAdd = maxOf(0.0, activeElapsed)
+
+                        displayTotal += elapsedToAdd
+                        displayToday += elapsedToAdd
+                        totalLiveAdditionalTime += elapsedToAdd
+                    }
+
+                    val todayStr = if (displayToday > 0) " (dziś: ${formatTimeSpentLive(displayToday)})" else ""
+                    val activeMarker = if (summary.isActive) " 🔴 aktywny" else ""
+
+                    Text(
+                        text = "👤 ${summary.userName}  ${formatTimeSpentLive(displayTotal)}$todayStr$activeMarker",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (summary.isActive) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                val grandTotal = (baseTaskTime ?: 0.0) + totalLiveAdditionalTime
+
+                if (totalLiveAdditionalTime > 0) {
+                    Text(
+                        text = "Razem: ${formatTimeSpentLive(baseTaskTime)} + ${formatTimeSpentLive(totalLiveAdditionalTime)} = ${formatTimeSpentLive(grandTotal)}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        color = androidx.compose.ui.graphics.Color(0xFF1565C0)
+                    )
+                } else {
+                    Text(
+                        text = "Razem: ${formatTimeSpentLive(grandTotal)}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                    )
+                }
+            }
         }
     }
 }
@@ -419,6 +723,8 @@ fun TaskDetailScreen(
     // DODANO: Pobieranie listy wiadomości
     val chatMessages by viewModel.chatMessages.collectAsState()
     val usersMap by viewModel.usersMap.collectAsState()
+
+    val timeSummaries by viewModel.timeSummaries.collectAsState()
 
     Column(
         modifier = Modifier
@@ -471,13 +777,23 @@ fun TaskDetailScreen(
                     UserProfileRow(user = task?.creator, roleLabel = "Zleceniodawca")
                     Spacer(modifier = Modifier.height(8.dp))
                     UserProfileRow(user = task?.responsible, roleLabel = "Odpowiedzialny")
+
+                    // DODANE: Wywołanie listy uczestników
+                    AccomplicesRow(accomplices = task?.accomplicesData)
                 }
+            }
+
+            if (timeSummaries.isNotEmpty() || (task?.timeSpent != null && task!!.timeSpent!! > 0.0)) {
+                TimeTrackerSection(
+                    summaries = timeSummaries,
+                    baseTaskTime = task?.timeSpent // Zależnie czy logi pokrywają się z task.timeSpent, w Bitrixie często timeSpent w zadaniu to podsumowanie
+                )
             }
 
             // Opis
             if (!task?.description.isNullOrEmpty()) {
-                Text(text = "Opis zadania:", style = MaterialTheme.typography.titleMedium)
-                Text(text = task?.description ?: "", modifier = Modifier.padding(top = 4.dp, bottom = 16.dp))
+                ExpandableDescription(description = task!!.description!!)
+                Spacer(modifier = Modifier.height(16.dp))
             }
 
             if (chatMessages.isNotEmpty()) {
@@ -528,9 +844,10 @@ fun TaskDetailScreen(
                                         Spacer(modifier = Modifier.width(8.dp))
                                     } else if (!isSystem) {
                                         Icon(
-                                            imageVector = Icons.Default.ArrowBack, // Zmień na ikonę profilu np. Icons.Default.Person
+                                            imageVector = Icons.Default.Person, // Zmień na ikonę profilu np. Icons.Default.Person
                                             contentDescription = "Brak avatara",
-                                            modifier = Modifier.size(24.dp).clip(CircleShape)
+                                            modifier = Modifier.size(24.dp).clip(CircleShape),
+                                            tint = androidx.compose.ui.graphics.Color.Gray
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                     }
@@ -603,6 +920,9 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
     val tasksList: StateFlow<List<BitrixTask>> = _tasksList.asStateFlow()
 
     private val cacheManager = JsonUtil(application)
+
+    private val _timeSummaries = MutableStateFlow<List<UserTimeSummary>>(emptyList())
+    val timeSummaries: StateFlow<List<UserTimeSummary>> = _timeSummaries.asStateFlow()
 
     init {
         checkJson()
@@ -683,6 +1003,7 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
             // Zabezpieczenie: czyścimy stary widok przed załadowaniem nowego
             _selectedTask.value = null
             _chatMessages.value = emptyList() // Czyścimy stary czat!
+            _timeSummaries.value = emptyList() // <-- DODANE
 
             try {
                 val response = RetrofitClient.api.getTaskDetailsRaw(taskId)
@@ -757,6 +1078,7 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
 
                 // DODANO: Przekazanie wiadomości do interfejsu!
                 _chatMessages.value = messages
+                _timeSummaries.value = calculateTimeSummaries(messages)
             }
 
         } catch (e: Exception) {
@@ -899,6 +1221,7 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
                 stringBuilder.append("Aktywność: ${task.activity}\n")
                 stringBuilder.append("Utworzono: ${task.createdAt}\n")
                 stringBuilder.append("Odpowiedzialny: ${task.responsible}\n")
+                //stringBuilder.append("Uczestnicy: ${task.accomplices}\n")
                 stringBuilder.append("----------------------------\n")
             }
 
