@@ -104,6 +104,16 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 
 
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Refresh
+
+
 // Reprezentuje pojedyncze zadanie z Bitrixa
 data class BitrixResponse(
     @SerializedName("result") val result: BitrixResult,
@@ -131,8 +141,9 @@ data class BitrixTask(
     @SerializedName("deadline") val deadline: String?,
     @SerializedName("activityDate") val activity: String?,
     @SerializedName("createdDate") val createdAt: String?,
-    @SerializedName("chatId") val chatId: Int?, // Zmiana na Int
-    @SerializedName("chat_Id") val chatIdAlt: Int?, // Zmiana na Int
+    @SerializedName("closedDate") val closedDate: String?,
+    @SerializedName("chatId") val chatId: Int?,
+    @SerializedName("chat_Id") val chatIdAlt: Int?,
     @SerializedName("creator") val creator: BitrixUser?,
     @SerializedName("responsible") val responsible: BitrixUser?,
     @SerializedName("accomplicesData") val accomplicesData: Map<String, BitrixUser>?
@@ -365,7 +376,8 @@ fun formatBitrixDate(dateString: String?): String {
     if (dateString.isNullOrEmpty()) return "Brak daty"
     return try {
         val parsedDate = ZonedDateTime.parse(dateString)
-        val formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
+        // ZMIENIONO: Nowy wzorzec: DD-MM-RRRR, godz: HH:MM
+        val formatter = DateTimeFormatter.ofPattern("dd-MM-yyyy, 'godz:' HH:mm")
         parsedDate.format(formatter)
     } catch (e: Exception) {
         dateString // W razie błędu zwraca oryginalny tekst
@@ -380,14 +392,34 @@ fun UserProfileRow(user: BitrixUser?, roleLabel: String) {
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.padding(vertical = 4.dp)
     ) {
-        AsyncImage(
-            model = getFullAvatarUrl(user.icon),
-            contentDescription = "Avatar użytkownika",
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-        )
+        val avatarUrl = getFullAvatarUrl(user.icon)
+
+        if (avatarUrl.isNotEmpty() && !avatarUrl.endsWith("default_avatar.png")) {
+            AsyncImage(
+                model = avatarUrl,
+                contentDescription = "Avatar użytkownika",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(androidx.compose.ui.graphics.Color.LightGray),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = "Domyślny avatar",
+                    tint = androidx.compose.ui.graphics.Color.White,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.width(12.dp))
         Column {
             Text(text = roleLabel, style = MaterialTheme.typography.labelSmall, color = androidx.compose.ui.graphics.Color.Gray)
@@ -504,6 +536,7 @@ fun AccomplicesRow(accomplices: Map<String, BitrixUser>?) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
     viewModel: BitrixViewModel,
@@ -512,103 +545,151 @@ fun MainScreen(
 ) {
     val isFetching by viewModel.isFetching.collectAsState()
     val statusText by viewModel.statusText.collectAsState()
-    val tasksText by viewModel.tasksText.collectAsState()
     val currentFilter by viewModel.currentFilter.collectAsState()
     val tasksList by viewModel.tasksList.collectAsState()
 
-    // DODANO: Stany dla nowego filtra użytkowników
     val usersMap by viewModel.usersMap.collectAsState()
     val selectedUserId by viewModel.selectedUserId.collectAsState()
 
-    var expanded by remember { mutableStateOf(false) }
-    // DODANO: Nowy tryb do listy
     val filterOptions = listOf("Pobieranie tasków", "Wszystkie aktywne", "Wybrany użytkownik")
 
-    Column(
-        modifier = modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(text = statusText)
-            Spacer(modifier = Modifier.height(16.dp))
+    // Stan bocznego menu
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val coroutineScope = rememberCoroutineScope()
 
-            // Pierwszy Dropdown - Wybór trybu
-            Box {
-                Button(onClick = { expanded = true }, enabled = !isFetching) {
-                    Text(text = "Tryb testowy: $currentFilter")
-                }
-                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    filterOptions.forEach { option ->
-                        DropdownMenuItem(
-                            text = { Text(option) },
-                            onClick = {
-                                viewModel.setFilter(option)
-                                expanded = false
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet {
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Menu i filtry",
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.titleLarge
+                )
+                Divider()
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Generowanie elementów menu
+                filterOptions.forEach { option ->
+                    NavigationDrawerItem(
+                        label = { Text(text = option) },
+                        selected = option == currentFilter,
+                        onClick = {
+                            viewModel.setFilter(option)
+                            // Zamykamy menu automatycznie, chyba że użytkownik
+                            // musi jeszcze wybrać pracownika w kolejnym kroku
+                            if (option != "Wybrany użytkownik") {
+                                coroutineScope.launch { drawerState.close() }
                             }
-                        )
-                    }
+                        },
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    )
                 }
-            }
 
-            Spacer(modifier = Modifier.height(8.dp))
+                // Dodatkowe opcje pokazujące się tylko dla wybranego filtru
+                if (currentFilter == "Wybrany użytkownik") {
+                    Divider(modifier = Modifier.padding(vertical = 16.dp))
+                    Text(
+                        text = "Wybierz pracownika:",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = androidx.compose.ui.graphics.Color.Gray
+                    )
 
-            // Drugi Dropdown - Wybór użytkownika (widoczny tylko w konkretnym trybie)
-            if (currentFilter == "Wybrany użytkownik") {
-                var userExpanded by remember { mutableStateOf(false) }
-                val selectedUserName = usersMap[selectedUserId]?.name ?: "Wybierz pracownika z listy"
+                    var userExpanded by remember { mutableStateOf(false) }
+                    val selectedUserName = usersMap[selectedUserId]?.name ?: "Kliknij, aby wybrać"
 
-                Box {
-                    Button(
-                        onClick = { userExpanded = true },
-                        enabled = !isFetching,
-                        // Delikatnie inny kolor dla odróżnienia
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.secondary
-                        )
-                    ) {
-                        Text(text = "👤 $selectedUserName")
-                    }
-                    // Ograniczamy wysokość listy, żeby przy 100 użytkownikach nie uciekła z ekranu
-                    DropdownMenu(
-                        expanded = userExpanded,
-                        onDismissRequest = { userExpanded = false },
-                        modifier = Modifier.height(300.dp)
-                    ) {
-                        // Sortujemy mapę alfabetycznie po imieniu
-                        usersMap.entries.sortedBy { it.value.name }.forEach { (id, profile) ->
-                            DropdownMenuItem(
-                                text = { Text(profile.name) },
-                                onClick = {
-                                    viewModel.setSelectedUserId(id)
-                                    userExpanded = false
-                                }
-                            )
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        Button(
+                            onClick = { userExpanded = true },
+                            enabled = !isFetching,
+                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.secondary
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(text = "👤 $selectedUserName")
+                        }
+
+                        DropdownMenu(
+                            expanded = userExpanded,
+                            onDismissRequest = { userExpanded = false },
+                            modifier = Modifier.height(300.dp)
+                        ) {
+                            usersMap.entries.sortedBy { it.value.name }.forEach { (id, profile) ->
+                                DropdownMenuItem(
+                                    text = { Text(profile.name) },
+                                    onClick = {
+                                        viewModel.setSelectedUserId(id)
+                                        userExpanded = false
+                                        // Po ostatecznym wyborze zamykamy boczne menu
+                                        coroutineScope.launch { drawerState.close() }
+                                    }
+                                )
+                            }
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-
-            Button(onClick = { viewModel.fetchData(isAuto = false) }, enabled = !isFetching) {
-                Text(text = "Pobierz ręcznie")
             }
         }
+    ) {
+        // Właściwa zawartość głównego ekranu z górnym paskiem (TopAppBar)
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = currentFilter,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { coroutineScope.launch { drawerState.open() } }) {
+                            Icon(imageVector = Icons.Default.Menu, contentDescription = "Otwórz menu")
+                        }
+                    },
+                    actions = {
+                        // Przycisk "Odśwież" zastępujący przycisk "Pobierz ręcznie"
+                        IconButton(
+                            onClick = { viewModel.fetchData(isAuto = false) },
+                            enabled = !isFetching
+                        ) {
+                            Icon(imageVector = Icons.Default.Refresh, contentDescription = "Odśwież")
+                        }
+                    }
+                )
+            }
+        ) { innerPadding ->
+            Column(
+                modifier = modifier
+                    .fillMaxSize()
+                    .padding(innerPadding), // Margines uwzględniający górny pasek
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Wyświetlanie aktualnego statusu działania (np. "Pobieranie...")
+                if (statusText.isNotBlank()) {
+                    Text(
+                        text = statusText,
+                        modifier = Modifier.padding(8.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = androidx.compose.ui.graphics.Color.Gray
+                    )
+                }
 
-        // Reszta kodu pozostaje bez zmian
-        TaskListWithFab(
-            tasksList = tasksList,
-            navController = navController,
-            viewModel = viewModel
-        )
+                // Lista zadań przeniesiona z poprzedniej wersji
+                TaskListWithFab(
+                    tasksList = tasksList,
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+        }
     }
 }
 
-
-// DODANO: Nowy komponent - pojedynczy kafelek zadania
-// Zaktualizowany komponent - pojedynczy kafelek zadania
 @Composable
 fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
     // Mapowanie statusów liczbowych na tekst
@@ -649,13 +730,22 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
 
             // Daty
             Text(
-                text = "Utworzono: ${task.createdAt ?: "Brak danych"}",
+                text = "Utworzono: ${if (task.createdAt.isNullOrEmpty()) "Brak danych" else formatBitrixDate(task.createdAt)}",
                 style = MaterialTheme.typography.bodySmall
             )
             Text(
-                text = "Deadline: ${task.deadline ?: "Brak"}",
+                text = "Deadline: ${if (task.deadline.isNullOrEmpty()) "Brak" else formatBitrixDate(task.deadline)}",
                 style = MaterialTheme.typography.bodySmall
             )
+
+            if (task.status == 5 && !task.closedDate.isNullOrEmpty()) {
+                Text(
+                    text = "Zakończono: ${formatBitrixDate(task.closedDate)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = androidx.compose.ui.graphics.Color(0xFF388E3C), // Ciemnozielony kolor
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                )
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
             Divider(thickness = 0.5.dp, color = androidx.compose.ui.graphics.Color.LightGray)
@@ -834,6 +924,18 @@ fun TaskDetailScreen(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val coroutineScope = rememberCoroutineScope()
 
+    // DODANO: Mapowanie statusów liczbowych na tekst w szczegółach
+    val mappedStatusText = when (task?.status) {
+        1 -> "Nowe"
+        2 -> "Oczekujące"
+        3 -> "W trakcie"
+        4 -> "Do kontroli"
+        5 -> "Zakończone"
+        6 -> "Odłożone"
+        null -> "Brak danych"
+        else -> "Nieznany (${task?.status})"
+    }
+
     // Zawijamy cały ekran w Box, aby móc umieścić pływające przyciski nad treścią
     Box(modifier = Modifier.fillMaxSize()) {
 
@@ -867,10 +969,20 @@ fun TaskDetailScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("ID: ${task?.id}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Status: ${task?.status}", style = MaterialTheme.typography.bodyMedium)
+                        // ZMIENIONO: Wyświetla zmapowany tekst zamiast samej cyfry
+                        Text("Status: $mappedStatusText", style = MaterialTheme.typography.bodyMedium)
                         Text("Czas pracy: ${formatTimeSpent(task?.timeSpent)}", style = MaterialTheme.typography.bodyMedium)
                         Text("Deadline: ${formatBitrixDate(task?.deadline)}", style = MaterialTheme.typography.bodyMedium)
                         Text("Utworzono: ${formatBitrixDate(task?.createdAt)}", style = MaterialTheme.typography.bodyMedium)
+
+                        if (task?.status == 5 && !task?.closedDate.isNullOrEmpty()) {
+                            Text(
+                                text = "Zakończono: ${formatBitrixDate(task!!.closedDate)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = androidx.compose.ui.graphics.Color(0xFF388E3C),
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                            )
+                        }
                     }
                 }
 
@@ -880,8 +992,10 @@ fun TaskDetailScreen(
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
+                        // Profil zleceniodawcy - funkcja wewnątrz ma już dodany domyślny avatar
                         UserProfileRow(user = task?.creator, roleLabel = "Zleceniodawca")
                         Spacer(modifier = Modifier.height(8.dp))
+                        // Profil odpowiedzialnego
                         UserProfileRow(user = task?.responsible, roleLabel = "Odpowiedzialny")
 
                         AccomplicesRow(accomplices = task?.accomplicesData)
@@ -934,7 +1048,8 @@ fun TaskDetailScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        if (avatarUrl.isNotEmpty()) {
+                                        // LOGIKA CHATU POZOSTAJE JAK BYŁA WCZEŚNIEJ, JEST POPRAWNA
+                                        if (avatarUrl.isNotEmpty() && !avatarUrl.endsWith("default_avatar.png")) {
                                             AsyncImage(
                                                 model = avatarUrl,
                                                 contentDescription = "Avatar",
@@ -945,12 +1060,21 @@ fun TaskDetailScreen(
                                             )
                                             Spacer(modifier = Modifier.width(8.dp))
                                         } else if (!isSystem) {
-                                            Icon(
-                                                imageVector = Icons.Default.Person,
-                                                contentDescription = "Brak avatara",
-                                                modifier = Modifier.size(24.dp).clip(CircleShape),
-                                                tint = androidx.compose.ui.graphics.Color.Gray
-                                            )
+                                            // Mały zastępczy avatar na chat
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(24.dp)
+                                                    .clip(CircleShape)
+                                                    .background(androidx.compose.ui.graphics.Color.LightGray),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Person,
+                                                    contentDescription = "Brak avatara",
+                                                    tint = androidx.compose.ui.graphics.Color.White,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
                                             Spacer(modifier = Modifier.width(8.dp))
                                         }
 
@@ -1018,8 +1142,6 @@ fun TaskDetailScreen(
             ModalBottomSheet(
                 onDismissRequest = { showBottomSheet = false },
                 sheetState = sheetState,
-                // Upewnia się, że klawiatura ładnie przesuwa okienko do góry
-                //windowInsets = WindowInsets.ime
             ) {
                 Column(
                     modifier = Modifier
@@ -1054,11 +1176,8 @@ fun TaskDetailScreen(
                             onClick = {
                                 val chatId = task?.chatId ?: task?.chatIdAlt
                                 if (chatId != null && messageText.isNotBlank()) {
-                                    // 1. Wysyłamy wiadomość
                                     viewModel.sendMessage(taskId, chatId, messageText)
-                                    // 2. Czyścimy pole
                                     messageText = ""
-                                    // 3. Chowamy okienko z animacją
                                     coroutineScope.launch { sheetState.hide() }.invokeOnCompletion {
                                         if (!sheetState.isVisible) {
                                             showBottomSheet = false
@@ -1131,6 +1250,8 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setSelectedUserId(id: String) {
         _selectedUserId.value = id
+        loadListFromCache(getCacheKeyForFilter(_currentFilter.value))
+        fetchData()
     }
 
     fun setFilter(newFilter: String) {
@@ -1377,45 +1498,37 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun fetchTasksForSpecificUser(userId: String) {
         val cacheKey = "user_tasks_$userId"
         try {
-            _statusText.value = "Rozpoczynam wyszukiwanie zadań pracownika..."
-            val allTasks = mutableListOf<BitrixTask>()
-            var start = 0
+            _statusText.value = "Lokalne wyszukiwanie zadań pracownika..."
 
-            // Cofamy się np. o 30 dni, żeby nie pobierać całej historii firmy
-            val dateStr = LocalDateTime.now().minusDays(30)
-                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'00:00:00+01:00"))
+            // 1. Wczytujemy wszystkie pobrane do tej pory zadania z głównego pliku
+            val allTasksJson = cacheManager.readTaskList("all_tasks")
 
-            while (true) {
-                val response = RetrofitClient.api.getTasksForUser(
-                    start = start,
-                    creatorId = userId,
-                    responsibleId = userId,
-                    accompliceId = userId,
-                    activityDate = dateStr
-                )
-
-                val tasksBatch = response.result.tasks
-                if (tasksBatch.isEmpty()) break
-
-                allTasks.addAll(tasksBatch)
-                _statusText.value = "Pobrano ${allTasks.size} zadań pracownika..."
-
-                val next = response.next
-                if (next != null) {
-                    start = next
-                } else {
-                    break
-                }
+            if (allTasksJson.isNullOrEmpty()) {
+                _statusText.value = "Brak zadań w pamięci. Pobierz najpierw wszystkie zadania."
+                _tasksList.value = emptyList()
+                return
             }
 
-            _statusText.value = "Znaleziono ${allTasks.size} zadań dla tego użytkownika."
-            _tasksList.value = allTasks.reversed()
+            // 2. Dekodujemy JSON do listy obiektów
+            val listType = object : TypeToken<List<BitrixTask>>() {}.type
+            val allTasks: List<BitrixTask> = Gson().fromJson(allTasksJson, listType)
 
-            val finalJson = Gson().toJson(_tasksList.value)
+            // 3. Filtrujemy listę według założeń: Twórca, Odpowiedzialny LUB Uczestnik
+            val filteredTasks = allTasks.filter { task ->
+                task.creator?.id == userId ||
+                        task.responsible?.id == userId ||
+                        task.accomplicesData?.containsKey(userId) == true
+            }.sortedByDescending { it.activity ?: "" }
+
+            _statusText.value = "Znaleziono lokalnie ${filteredTasks.size} zadań."
+            _tasksList.value = filteredTasks // Tu nie odwracamy, bo allTasks jest już odwrócone przy pobieraniu
+
+            // 4. Zapisujemy wynik do cache wybranego pracownika
+            val finalJson = Gson().toJson(filteredTasks)
             cacheManager.saveTaskList(cacheKey, finalJson)
 
         } catch (e: Exception) {
-            _statusText.value = "Brak sieci. Ładuję kopię lokalną..."
+            _statusText.value = "Błąd lokalnego filtrowania: ${e.message}"
             loadListFromCache(cacheKey)
         } finally {
             _isFetching.value = false
@@ -1458,13 +1571,12 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
 
+            _statusText.value = "Zakończono pobieranie! Razem: ${allTasks.size} zadań."
+            _tasksList.value = allTasks.sortedByDescending { it.activity ?: "" }
+
             val finalJson = Gson().toJson(_tasksList.value)
             cacheManager.saveTaskList(cacheKey, finalJson)
-
-            _statusText.value = "Zakończono pobieranie! Razem: ${allTasks.size} zadań."
             _tasksText.value = finalJson
-
-            _tasksList.value = allTasks.reversed()
 
         } catch (e: Exception) {
             _statusText.value = "Brak sieci. Ładuję kopię lokalną..."
@@ -1504,7 +1616,7 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             // DODANO: Odwrócenie całej listy w miejscu (najnowsze trafiają na indeks 0)
-            allTasks.reverse()
+            allTasks.sortByDescending { it.activity ?: "" }
 
             val fetchedTasksStandard = Gson().toJson(allTasks)
             cacheManager.saveJson(fetchedTasksStandard)
@@ -1546,41 +1658,6 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
             _isFetching.value = false
         }
     }
-
-//    private suspend fun fetchStandardTasksRaw(isAuto: Boolean) {
-//        try {
-//            // Najpierw próbujemy pokazać dane z cache, żeby użytkownik nie czekał
-//            val cachedData = cacheManager.readJson()
-//            if (cachedData != null && _tasksText.value.isEmpty()) {
-//                _statusText.value = "Wyświetlam dane z pamięci podręcznej..."
-//                _tasksText.value = cachedData
-//            }
-//
-//            // Pobieramy świeże dane z webhooka
-//            _statusText.value = "Pobieranie świeżych danych..."
-//            val response = RetrofitClient.api.getTasksRaw()
-//            val json = response.string()
-//
-//            // Zapisujemy nowy JSON do pliku (nadpisujemy stary)
-//            cacheManager.saveJson(json)
-//
-//            _statusText.value = "Pobrano i zapisano dane!"
-//            _tasksText.value = json
-//
-//        } catch (e: Exception) {
-//            // Jeśli nie ma internetu, a mamy cache, poinformuj o tym
-//            val cachedData = cacheManager.readJson()
-//            if (cachedData != null) {
-//                _statusText.value = "Brak sieci. Pokazuję ostatnio zapisane dane."
-//                _tasksText.value = cachedData
-//            } else {
-//                _statusText.value = "Błąd komunikacji z Bitrixem i brak danych w cache."
-//                _tasksText.value = "Wyjątek: ${e.javaClass.simpleName}\nTreść: ${e.message}"
-//            }
-//        } finally {
-//            _isFetching.value = false
-//        }
-//    }
 
     private suspend fun bgFetchAllGroups(isAuto: Boolean) {
         delay(2000)

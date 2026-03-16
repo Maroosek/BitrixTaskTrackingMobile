@@ -51,7 +51,7 @@ interface BitrixApi {
         @Query("filter[0][RESPONSIBLE_ID]") responsibleId: String,
         @Query("filter[0][ACCOMPLICE]") accompliceId: String,
         // Filtr daty poza grupą [0], co domyślnie łączy się operatorem AND
-        @Query("filter[>=ACTIVITY_DATE]") activityDate: String? = null
+        //@Query("filter[>=ACTIVITY_DATE]") activityDate: String? = null
     ): BitrixResponse
 
     @GET("user.get.json")
