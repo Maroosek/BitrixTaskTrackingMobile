@@ -250,7 +250,8 @@ data class UserTimeSummary(
     val totalSeconds: Double,
     val todaySeconds: Double,
     val isActive: Boolean,
-    val activeStartDt: ZonedDateTime?
+    val activeStartDt: ZonedDateTime?,
+    val dailyBreakdown: Map<LocalDate, Double> = emptyMap()  // data → sekundy
 )
 
 data class UserProfile(
@@ -370,19 +371,27 @@ private fun calculateTimeSummaries(messages: List<ChatMessage>): List<UserTimeSu
         var todayElapsed = 0.0
         var isActive = false
         var activeStart: ZonedDateTime? = null
+        val dailyMap = mutableMapOf<LocalDate, Double>()
 
         for (sess in sessions) {
             if (sess.stop == null) {
                 isActive = true; activeStart = sess.start
             } else {
                 val elapsed = java.time.Duration.between(sess.start, sess.stop).seconds.toDouble()
-                totalElapsed += maxOf(0.0, elapsed)
+                val clamped = maxOf(0.0, elapsed)
+                totalElapsed += clamped
+
+                // Przypisujemy czas do dnia startu sesji (uproszczone, wystarczające dla 1-dniowych sesji)
+                val sessionDay = sess.start
+                    .withZoneSameInstant(ZoneId.of("Europe/Warsaw")).toLocalDate()
+                dailyMap[sessionDay] = (dailyMap[sessionDay] ?: 0.0) + clamped
+
                 if (sess.start.toLocalDate() == todayDate || sess.stop!!.toLocalDate() == todayDate) {
-                    todayElapsed += maxOf(0.0, elapsed)
+                    todayElapsed += clamped
                 }
             }
         }
-        summaries.add(UserTimeSummary(user, totalElapsed, todayElapsed, isActive, activeStart))
+        summaries.add(UserTimeSummary(user, totalElapsed, todayElapsed, isActive, activeStart, dailyMap))
     }
     return summaries
 }
@@ -1001,9 +1010,26 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
 @Composable
 fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) {
     var currentTime by remember { mutableStateOf(ZonedDateTime.now()) }
+    var showDetails by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         while (true) { delay(1000); currentTime = ZonedDateTime.now() }
     }
+
+    // Oblicz live-dodatek raz, żeby używać go i w nagłówku i w szczegółach
+    val liveExtras = remember(summaries, currentTime) {
+        summaries.associate { summary ->
+            val extra = if (summary.isActive && summary.activeStartDt != null)
+                maxOf(0.0, java.time.Duration.between(summary.activeStartDt, currentTime).seconds.toDouble())
+            else 0.0
+            summary.userName to extra
+        }
+    }
+    val totalLiveAdditionalTime = liveExtras.values.sum()
+    val grandTotal = (baseTaskTime ?: 0.0) + totalLiveAdditionalTime
+
+    val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
+    val dateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
@@ -1011,32 +1037,49 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
         colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color(0xFFE3F2FD))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("⏱ Raport czasu pracy", style = MaterialTheme.typography.titleMedium)
+
+            // ── Nagłówek z przyciskiem szczegółów ───────────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("⏱ Raport czasu pracy", style = MaterialTheme.typography.titleMedium)
+                if (summaries.isNotEmpty()) {
+                    TextButton(onClick = { showDetails = !showDetails }) {
+                        Text(
+                            text = if (showDetails) "Zwiń szczegóły ▲" else "Szczegóły ▼",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
+            }
+
             Divider(modifier = Modifier.padding(vertical = 8.dp))
+
             if (summaries.isEmpty() && (baseTaskTime == null || baseTaskTime <= 0.0)) {
                 Text("Brak historii czasu.", style = MaterialTheme.typography.bodyMedium,
                     color = androidx.compose.ui.graphics.Color.Gray)
             } else {
-                var totalLiveAdditionalTime = 0.0
+
+                // ── Wiersz per użytkownik (podsumowanie) ────────────────────
                 summaries.forEach { summary ->
-                    var displayTotal = summary.totalSeconds
-                    var displayToday = summary.todaySeconds
-                    if (summary.isActive && summary.activeStartDt != null) {
-                        val activeElapsed = java.time.Duration.between(summary.activeStartDt, currentTime).seconds.toDouble()
-                        val elapsedToAdd = maxOf(0.0, activeElapsed)
-                        displayTotal += elapsedToAdd; displayToday += elapsedToAdd
-                        totalLiveAdditionalTime += elapsedToAdd
-                    }
+                    val extra = liveExtras[summary.userName] ?: 0.0
+                    val displayTotal = summary.totalSeconds + extra
+                    val displayToday = summary.todaySeconds + extra
                     val todayStr = if (displayToday > 0) " (dziś: ${formatTimeSpentLive(displayToday)})" else ""
-                    val activeMarker = if (summary.isActive) " 🔴 aktywny" else ""
+                    val activeMarker = if (summary.isActive) " 🔴" else ""
+
                     Text(
                         text = "👤 ${summary.userName}  ${formatTimeSpentLive(displayTotal)}$todayStr$activeMarker",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = if (summary.isActive) FontWeight.Bold else FontWeight.Normal
                     )
                 }
+
                 Spacer(modifier = Modifier.height(8.dp))
-                val grandTotal = (baseTaskTime ?: 0.0) + totalLiveAdditionalTime
+
+                // ── Suma całkowita ───────────────────────────────────────────
                 if (totalLiveAdditionalTime > 0) {
                     Text(
                         text = "Razem: ${formatTimeSpentLive(baseTaskTime)} + ${formatTimeSpentLive(totalLiveAdditionalTime)} = ${formatTimeSpentLive(grandTotal)}",
@@ -1049,6 +1092,110 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
                         text = "Razem: ${formatTimeSpentLive(grandTotal)}",
                         style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold
                     )
+                }
+
+                // ── Szczegóły per dzień (rozwijane) ─────────────────────────
+                AnimatedVisibility(visible = showDetails) {
+                    Column(modifier = Modifier.padding(top = 12.dp)) {
+                        Divider(modifier = Modifier.padding(bottom = 10.dp))
+
+                        summaries.forEach { summary ->
+                            val extra = liveExtras[summary.userName] ?: 0.0
+
+                            // Zbieramy wszystkie dni z breakdownu + dziś jeśli aktywny
+                            val allDays = summary.dailyBreakdown.toMutableMap()
+                            if (summary.isActive && extra > 0) {
+                                allDays[today] = (allDays[today] ?: 0.0) + extra
+                            }
+
+                            if (allDays.isEmpty()) return@forEach
+
+                            // Nagłówek użytkownika
+                            Text(
+                                text = "👤 ${summary.userName}",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(bottom = 6.dp)
+                            )
+
+                            // Sortujemy od najnowszego
+                            val sortedDays = allDays.entries.sortedByDescending { it.key }
+
+                            // Zbieramy łączny czas tygodniami dla wizualnego podziału
+                            sortedDays.forEach { (date, seconds) ->
+                                val isToday = date == today
+                                val isYesterday = date == today.minusDays(1)
+                                val dateLabel = when {
+                                    isToday -> "Dzisiaj (${date.format(dateFormatter)})"
+                                    isYesterday -> "Wczoraj (${date.format(dateFormatter)})"
+                                    else -> date.format(dateFormatter)
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 3.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        // Pasek wizualny proporcjonalny do czasu w dniu
+                                        val maxDaySeconds = allDays.values.maxOrNull() ?: 1.0
+                                        val barFraction = (seconds / maxDaySeconds).toFloat().coerceIn(0.05f, 1f)
+                                        Box(
+                                            modifier = Modifier
+                                                .width((barFraction * 40).dp)
+                                                .height(8.dp)
+                                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
+                                                .background(
+                                                    if (isToday) MaterialTheme.colorScheme.primary
+                                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                                                )
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = dateLabel,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (isToday) MaterialTheme.colorScheme.primary
+                                            else androidx.compose.ui.graphics.Color.DarkGray,
+                                            fontWeight = if (isToday) FontWeight.SemiBold else FontWeight.Normal
+                                        )
+                                    }
+                                    Text(
+                                        text = formatTimeSpent(seconds),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isToday) MaterialTheme.colorScheme.primary
+                                        else androidx.compose.ui.graphics.Color.DarkGray
+                                    )
+                                }
+                            }
+
+                            // Suma dla użytkownika
+                            val userTotalWithLive = summary.totalSeconds + extra
+                            Divider(
+                                modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
+                                color = androidx.compose.ui.graphics.Color.LightGray
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Suma",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = androidx.compose.ui.graphics.Color.Gray
+                                )
+                                Text(
+                                    text = formatTimeSpent(userTotalWithLive),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = androidx.compose.ui.graphics.Color.Gray
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
