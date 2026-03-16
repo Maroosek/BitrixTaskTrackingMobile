@@ -79,15 +79,11 @@ import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
-import androidx.compose.foundation.clickable
-
-
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 
@@ -96,14 +92,9 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material.icons.filled.Send
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.ime
 import androidx.compose.material3.IconButton
-
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
-
-
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -112,9 +103,15 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontStyle
+import java.time.ZoneId
 
 
-// Reprezentuje pojedyncze zadanie z Bitrixa
 data class BitrixResponse(
     @SerializedName("result") val result: BitrixResult,
     @SerializedName("next") val next: Int? = null
@@ -144,10 +141,10 @@ data class BitrixTask(
     @SerializedName("closedDate") val closedDate: String?,
     @SerializedName("chatId") val chatId: Int?,
     @SerializedName("chat_Id") val chatIdAlt: Int?,
+    @SerializedName("groupId") val groupId: String?,
     @SerializedName("creator") val creator: BitrixUser?,
     @SerializedName("responsible") val responsible: BitrixUser?,
     @SerializedName("accomplicesData") val accomplicesData: Map<String, BitrixUser>?
-
 )
 
 data class BitrixUser(
@@ -213,12 +210,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             BitrixTaskTrackingTheme {
-                // DODANO: Kontroler nawigacji
                 val navController = rememberNavController()
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
 
-                    // DODANO: NavHost zarządza tym, który ekran jest obecnie wyświetlany
                     NavHost(
                         navController = navController,
                         startDestination = "taskList",
@@ -232,15 +227,12 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        // Ekran 2: Szczegóły zadania (z dynamicznym parametrem {taskId})
+                        // Ekran 2: Szczegóły zadania
                         composable(
                             route = "taskDetail/{taskId}",
                             arguments = listOf(navArgument("taskId") { type = NavType.StringType })
                         ) { backStackEntry ->
-                            // Wyciągamy przekazane ID z argumentów
                             val taskId = backStackEntry.arguments?.getString("taskId") ?: "Brak ID"
-
-                            // Wywołujemy nowy ekran
                             TaskDetailScreen(taskId = taskId, navController = navController, viewModel = viewModel)
                         }
                     }
@@ -249,7 +241,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-// Formatyzer czasu na żywo (np. 01:25:10)
+
 fun formatTimeSpentLive(seconds: Double?): String {
     if (seconds == null || seconds <= 0.0) return "00:00:00"
     val totalSeconds = seconds.toLong()
@@ -261,7 +253,6 @@ fun formatTimeSpentLive(seconds: Double?): String {
 
 fun getFullAvatarUrl(iconPath: String?): String {
     if (iconPath.isNullOrEmpty()) return ""
-    // Zmień "https://twojadomena.bitrix24.pl" na swój właściwy adres
     return if (iconPath.startsWith("/")) {
         "https://jenaeuropa.bitrix24.pl$iconPath"
     } else {
@@ -269,9 +260,6 @@ fun getFullAvatarUrl(iconPath: String?): String {
     }
 }
 
-
-
-// Przelicza sekundy na czytelny format (np. "5h 19m")
 fun formatTimeSpent(seconds: Double?): String {
     if (seconds == null || seconds <= 0.0) return "0h 0m"
     val totalMinutes = (seconds / 60).toLong()
@@ -290,7 +278,6 @@ private fun calculateTimeSummaries(messages: List<ChatMessage>): List<UserTimeSu
 
     val todayDate = ZonedDateTime.now().toLocalDate()
 
-    // Przetwarzanie od najstarszych do najnowszych wiadomości
     for (msg in messages.reversed()) {
         val text = msg.text ?: continue
         val rawDate = msg.date ?: continue
@@ -371,16 +358,53 @@ private fun calculateTimeSummaries(messages: List<ChatMessage>): List<UserTimeSu
     return summaries
 }
 
-// Formatuje datę ISO z Bitrixa na polski format
 fun formatBitrixDate(dateString: String?): String {
     if (dateString.isNullOrEmpty()) return "Brak daty"
     return try {
         val parsedDate = ZonedDateTime.parse(dateString)
-        // ZMIENIONO: Nowy wzorzec: DD-MM-RRRR, godz: HH:MM
+
+        val adjustedDate = parsedDate.withZoneSameInstant(ZoneId.of("Europe/Warsaw"))
+
         val formatter = DateTimeFormatter.ofPattern("dd-MM-yyyy, 'godz:' HH:mm")
-        parsedDate.format(formatter)
+        adjustedDate.format(formatter)
     } catch (e: Exception) {
-        dateString // W razie błędu zwraca oryginalny tekst
+        dateString
+    }
+}
+
+fun formatChatMessage(rawText: String?): AnnotatedString {
+    if (rawText == null) return buildAnnotatedString { append("[Brak tekstu]") }
+
+    // 1. Usuwanie tagów [USER] i zostawienie samej nazwy
+    val userRegex = Regex("\\[USER=\\d+\\](.*?)\\[/USER\\]", RegexOption.IGNORE_CASE)
+    val step1Text = rawText.replace(userRegex, "$1")
+
+    // 2. Wyszukiwanie tagów [QUOTE] (flaga (?s) pozwala kropce złapać też znaki nowej linii)
+    val quoteRegex = Regex("(?s)\\[QUOTE\\](.*?)\\[/QUOTE\\]")
+
+    return buildAnnotatedString {
+        var lastIndex = 0
+        val matches = quoteRegex.findAll(step1Text)
+
+        for (match in matches) {
+            append(step1Text.substring(lastIndex, match.range.first))
+
+            val quoteContent = match.groupValues[1]
+                .replace("[B]", "", ignoreCase = true)
+                .replace("[/B]", "", ignoreCase = true)
+                .trim()
+
+            withStyle(style = SpanStyle(
+                fontWeight = FontWeight.Bold,
+                fontStyle = FontStyle.Italic
+            )) {
+                append(quoteContent)
+            }
+
+            lastIndex = match.range.last + 1
+        }
+
+        append(step1Text.substring(lastIndex))
     }
 }
 
@@ -439,7 +463,7 @@ fun ExpandableDescription(description: String, maxLinesCollapsed: Int = 7) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize() // Płynna animacja rozwijania/zwijania
+            .animateContentSize()
     ) {
         Text(
             text = "Opis zadania:",
@@ -458,7 +482,6 @@ fun ExpandableDescription(description: String, maxLinesCollapsed: Int = 7) {
             modifier = Modifier.padding(top = 4.dp)
         )
 
-        // Pokazujemy przycisk tylko jeśli tekst jest za długi
         if (showReadMoreButton) {
             Text(
                 text = if (isExpanded) "Zwiń opis" else "Czytaj dalej...",
@@ -504,7 +527,6 @@ fun AccomplicesRow(accomplices: Map<String, BitrixUser>?) {
                                 .clip(CircleShape)
                         )
                     } else {
-                        // Zastępczy, domyślny avatar (zamiast strzałki)
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
@@ -523,7 +545,6 @@ fun AccomplicesRow(accomplices: Map<String, BitrixUser>?) {
 
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    // Wyświetlamy tylko pierwsze imię/słowo, by oszczędzić miejsce
                     Text(
                         text = user.name?.substringBefore(" ") ?: "Nieznany",
                         style = MaterialTheme.typography.labelSmall,
@@ -551,11 +572,18 @@ fun MainScreen(
     val usersMap by viewModel.usersMap.collectAsState()
     val selectedUserId by viewModel.selectedUserId.collectAsState()
 
-    val filterOptions = listOf("Pobieranie tasków", "Wszystkie aktywne", "Wybrany użytkownik")
+    val filterOptions = listOf("Wszystkie zadania", "Wszystkie aktywne", "Wybrany użytkownik")
 
-    // Stan bocznego menu
+
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(currentFilter) {
+        while(true) {
+            kotlinx.coroutines.delay(60_000) // Odświeżaj zadania co 60 sekund
+            viewModel.fetchData(isAuto = true)
+        }
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -570,15 +598,13 @@ fun MainScreen(
                 Divider()
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Generowanie elementów menu
                 filterOptions.forEach { option ->
                     NavigationDrawerItem(
                         label = { Text(text = option) },
                         selected = option == currentFilter,
                         onClick = {
                             viewModel.setFilter(option)
-                            // Zamykamy menu automatycznie, chyba że użytkownik
-                            // musi jeszcze wybrać pracownika w kolejnym kroku
+
                             if (option != "Wybrany użytkownik") {
                                 coroutineScope.launch { drawerState.close() }
                             }
@@ -587,7 +613,6 @@ fun MainScreen(
                     )
                 }
 
-                // Dodatkowe opcje pokazujące się tylko dla wybranego filtru
                 if (currentFilter == "Wybrany użytkownik") {
                     Divider(modifier = Modifier.padding(vertical = 16.dp))
                     Text(
@@ -623,7 +648,6 @@ fun MainScreen(
                                     onClick = {
                                         viewModel.setSelectedUserId(id)
                                         userExpanded = false
-                                        // Po ostatecznym wyborze zamykamy boczne menu
                                         coroutineScope.launch { drawerState.close() }
                                     }
                                 )
@@ -634,7 +658,6 @@ fun MainScreen(
             }
         }
     ) {
-        // Właściwa zawartość głównego ekranu z górnym paskiem (TopAppBar)
         Scaffold(
             topBar = {
                 TopAppBar(
@@ -652,7 +675,6 @@ fun MainScreen(
                         }
                     },
                     actions = {
-                        // Przycisk "Odśwież" zastępujący przycisk "Pobierz ręcznie"
                         IconButton(
                             onClick = { viewModel.fetchData(isAuto = false) },
                             enabled = !isFetching
@@ -666,10 +688,9 @@ fun MainScreen(
             Column(
                 modifier = modifier
                     .fillMaxSize()
-                    .padding(innerPadding), // Margines uwzględniający górny pasek
+                    .padding(innerPadding),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Wyświetlanie aktualnego statusu działania (np. "Pobieranie...")
                 if (statusText.isNotBlank()) {
                     Text(
                         text = statusText,
@@ -679,7 +700,6 @@ fun MainScreen(
                     )
                 }
 
-                // Lista zadań przeniesiona z poprzedniej wersji
                 TaskListWithFab(
                     tasksList = tasksList,
                     navController = navController,
@@ -692,15 +712,28 @@ fun MainScreen(
 
 @Composable
 fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
-    // Mapowanie statusów liczbowych na tekst
-    val statusText = when (task.status) {
-        1 -> "Nowe"
-        2 -> "Oczekujące"
-        3 -> "W trakcie"
-        4 -> "Do kontroli"
-        5 -> "Zakończone"
-        6 -> "Odłożone"
-        else -> "Nieznany (${task.status})"
+    val (statusText, statusColor) = when (task.status) {
+        1 -> "Nowe" to androidx.compose.ui.graphics.Color(0xFF2196F3) // Niebieski
+        2 -> "Oczekujące" to androidx.compose.ui.graphics.Color(0xFFFF9800) // Pomarańczowy
+        3 -> "W trakcie" to androidx.compose.ui.graphics.Color(0xFF4CAF50) // Zielony
+        4 -> "Do kontroli" to androidx.compose.ui.graphics.Color(0xFF9C27B0) // Fioletowy
+        5 -> "Zakończone" to androidx.compose.ui.graphics.Color(0xFF757575) // Szary
+        6 -> "Odłożone" to androidx.compose.ui.graphics.Color(0xFFF44336) // Czerwony
+        else -> "Nieznany (${task.status})" to androidx.compose.ui.graphics.Color.DarkGray
+    }
+
+    val groupColor = remember(task.groupId) {
+        if (task.groupId.isNullOrEmpty() || task.groupId == "0") {
+            androidx.compose.ui.graphics.Color(0xFFE0E0E0) // Delikatny szary, gdy brakuje grupy
+        } else {
+            val colors = listOf(
+                0xFFE57373, 0xFFF06292, 0xFFBA68C8, 0xFF9575CD, 0xFF7986CB,
+                0xFF64B5F6, 0xFF4DD0E1, 0xFF4DB6AC, 0xFF81C784, 0xFFAED581,
+                0xFFFFD54F, 0xFFFFB74D, 0xFFFF8A65, 0xFFA1887F
+            )
+            val index = kotlin.math.abs(task.groupId.hashCode()) % colors.size
+            androidx.compose.ui.graphics.Color(colors[index])
+        }
     }
 
     Card(
@@ -708,27 +741,51 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
             .fillMaxWidth()
             .padding(vertical = 8.dp)
             .clickable { onClick() },
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = groupColor)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // Tytuł
+        Column(
+            modifier = Modifier
+                .padding(start = 6.dp)
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(16.dp)
+        ) {
             Text(
                 text = task.title ?: "Brak tytułu",
                 style = MaterialTheme.typography.titleMedium
             )
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "ID: ${task.id}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                androidx.compose.material3.Surface(
+                    color = statusColor.copy(alpha = 0.15f), // Lekko przezroczyste tło
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = statusText,
+                        color = statusColor, // Pełny kolor dla tekstu
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(8.dp))
 
-            // ID i zmapowany Status
-            Text(
-                text = "ID: ${task.id} | Status: $statusText",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // Daty
             Text(
                 text = "Utworzono: ${if (task.createdAt.isNullOrEmpty()) "Brak danych" else formatBitrixDate(task.createdAt)}",
                 style = MaterialTheme.typography.bodySmall
@@ -742,7 +799,7 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
                 Text(
                     text = "Zakończono: ${formatBitrixDate(task.closedDate)}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = androidx.compose.ui.graphics.Color(0xFF388E3C), // Ciemnozielony kolor
+                    color = androidx.compose.ui.graphics.Color(0xFF388E3C),
                     fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
                 )
             }
@@ -751,7 +808,6 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
             Divider(thickness = 0.5.dp, color = androidx.compose.ui.graphics.Color.LightGray)
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Osoby przypisane
             Text(
                 text = "Zleceniodawca: ${task.creator?.name ?: "Nieznany"}",
                 style = MaterialTheme.typography.bodySmall,
@@ -762,11 +818,6 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = androidx.compose.ui.graphics.Color.DarkGray
             )
-//            Text(
-//                text = "Uczestnicy: ${task.accomplices?.name ?: "Nieznany"}",
-//                style = MaterialTheme.typography.bodySmall,
-//                color = androidx.compose.ui.graphics.Color.DarkGray
-//            )
         }
     }
 }
@@ -873,8 +924,6 @@ fun TaskListWithFab(
             }
         }
 
-        // Tutaj kompilator bez problemu użyje standardowego AnimatedVisibility,
-        // bo nie jest uwięziony wewnątrz ColumnScope.
         AnimatedVisibility(
             visible = showScrollToTop,
             enter = fadeIn(),
@@ -909,7 +958,12 @@ fun TaskDetailScreen(
     viewModel: BitrixViewModel
 ) {
     LaunchedEffect(key1 = taskId) {
-        viewModel.fetchTaskDetails(taskId)
+        viewModel.fetchTaskDetails(taskId, isSilent = false)
+
+        while(true) {
+            kotlinx.coroutines.delay(10_000) // Odświeżaj co 10 sekund
+            viewModel.fetchTaskDetails(taskId, isSilent = true)
+        }
     }
 
     val task by viewModel.selectedTask.collectAsState()
@@ -1094,7 +1148,7 @@ fun TaskDetailScreen(
 
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = message.text ?: "[Brak tekstu]",
+                                    text = formatChatMessage(message.text),
                                     style = if (isSystem) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
                                     fontStyle = if (isSystem) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal
                                 )
@@ -1205,8 +1259,6 @@ fun TaskDetailScreen(
 class BitrixViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _selectedTask = MutableStateFlow<BitrixTask?>(null)
-
-    // Słownik wszystkich użytkowników: kluczem jest ID
     private val _usersMap = MutableStateFlow<Map<String, UserProfile>>(emptyMap())
     val usersMap: StateFlow<Map<String, UserProfile>> = _usersMap.asStateFlow()
 
@@ -1218,7 +1270,7 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
     private val _isFetching = MutableStateFlow(false)
     val isFetching: StateFlow<Boolean> = _isFetching.asStateFlow()
 
-    val _statusText = MutableStateFlow("Oczekuję na akcję...")
+    val _statusText = MutableStateFlow("Uruchamianie...")
     val statusText: StateFlow<String> = _statusText.asStateFlow()
 
     private val _tasksText = MutableStateFlow("")
@@ -1233,9 +1285,7 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
     private val _selectedUserId = MutableStateFlow<String?>(null)
     val selectedUserId: StateFlow<String?> = _selectedUserId.asStateFlow()
 
-
     private val _tasksList = MutableStateFlow<List<BitrixTask>>(emptyList())
-
     val tasksList: StateFlow<List<BitrixTask>> = _tasksList.asStateFlow()
 
     private val cacheManager = JsonUtil(application)
@@ -1244,28 +1294,22 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
     val timeSummaries: StateFlow<List<UserTimeSummary>> = _timeSummaries.asStateFlow()
 
     init {
-        checkJson()
         loadAllUsers()
+        fetchData()
     }
 
     fun setSelectedUserId(id: String) {
         _selectedUserId.value = id
-        loadListFromCache(getCacheKeyForFilter(_currentFilter.value))
         fetchData()
     }
 
     fun setFilter(newFilter: String) {
         _currentFilter.value = newFilter
-
-        loadListFromCache(getCacheKeyForFilter(newFilter))
-
-        // Automatycznie pobierz świeże dane po zmianie filtra
         fetchData()
     }
 
     private fun loadAllUsers() {
         viewModelScope.launch(Dispatchers.IO) {
-            // 1. Najpierw czytamy z pamięci (jak w Pythonie self.users_map)
             val cachedData = cacheManager.readUsersList()
             if (cachedData != null) {
                 try {
@@ -1276,7 +1320,6 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
 
-            // 2. Pobieramy świeże dane w pętli (odpowiednik fetch_all_users)
             val allUsers = mutableMapOf<String, UserProfile>()
             var start = 0
 
@@ -1310,12 +1353,6 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun checkJson() {
-        // Ładujemy dane dla początkowego filtra
-        loadListFromCache(getCacheKeyForFilter(_currentFilter.value))
-    }
-
-    // DODANO: Pomocnicza funkcja mapująca nazwę filtra na nazwę pliku w cache
     private fun getCacheKeyForFilter(filterName: String): String {
         return when (filterName) {
             "Wszystkie aktywne" -> "active_tasks"
@@ -1324,24 +1361,22 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // DODANO: Pomocnicza funkcja wyciągnięta z checkJson
+
     private fun loadListFromCache(cacheKey: String) {
         val cachedData = cacheManager.readTaskList(cacheKey)
-        if (cachedData != null) {
-            _statusText.value = "Wyświetlam dane z pamięci podręcznej..."
-            _tasksText.value = cachedData
-
+        if (!cachedData.isNullOrEmpty()) {
             try {
                 val listType = object : TypeToken<List<BitrixTask>>() {}.type
                 val tasks: List<BitrixTask> = Gson().fromJson(cachedData, listType)
                 _tasksList.value = tasks
+                // Cichy status, jeśli sieć zawiedzie, użytkownik przynajmniej widzi, że ma cache
+                _statusText.value = "Pokazuję zapisane dane. Odświeżam w tle..."
             } catch (e: Exception) {
-                // Obsługa błędu parsowania JSON
+                _tasksList.value = emptyList()
             }
         } else {
-            // Jeśli nie ma cache dla tego trybu, czyścimy listę na ekranie
             _tasksList.value = emptyList()
-            _statusText.value = "Brak danych w pamięci podręcznej."
+            _statusText.value = "Brak danych. Trwa pierwsze pobieranie..."
         }
     }
 
@@ -1351,10 +1386,10 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
         _statusText.value = "Wysyłanie wiadomości..."
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                //val text = "Użytkownik Marek przekazuje: \n" + text
+                val text = "Użytkownik Marek przekazuje: \n" + text
                 var finalchat = "chat" + chatId
-                //It is possible to send message as someone else when changed system to N and provide different webhook url
-                RetrofitClient.api.sendMessage(finalchat, text, "N")
+                //It is impossible to send message as someone when you are not member of that task
+                RetrofitClient.api.sendMessage(finalchat, text, "Y")
 
                 delay(1000) // Symulacja opóźnienia sieci
                 _statusText.value = "Wiadomość wysłana!"
@@ -1367,13 +1402,16 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun fetchTaskDetails(taskId: String) {
+
+    fun fetchTaskDetails(taskId: String, isSilent: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
-            _statusText.value = "Pobieranie szczegółów zadania $taskId..."
-            // Zabezpieczenie: czyścimy stary widok przed załadowaniem nowego
-            _selectedTask.value = null
-            _chatMessages.value = emptyList() // Czyścimy stary czat!
-            _timeSummaries.value = emptyList() // <-- DODANE
+            if (!isSilent) {
+                _statusText.value = "Pobieranie szczegółów zadania $taskId..."
+                // Zabezpieczenie: czyścimy stary widok tylko podczas głównego ładowania
+                _selectedTask.value = null
+                _chatMessages.value = emptyList()
+                _timeSummaries.value = emptyList()
+            }
 
             try {
                 val response = RetrofitClient.api.getTaskDetailsRaw(taskId)
@@ -1385,23 +1423,23 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
                 val taskData = parsedResponse.result.task
 
                 _selectedTask.value = taskData
-                _statusText.value = "Pobrano szczegóły z sieci!"
+                if (!isSilent) _statusText.value = "Pobrano szczegóły z sieci!"
 
-                // Po prostu wywołujemy pobieranie, bez przypisywania (to funkcja asynchroniczna)
                 triggerChatFetch(taskData)
 
             } catch (e: Exception) {
-                val cachedJson = cacheManager.readTaskDetail(taskId)
-                if (cachedJson != null) {
-                    val parsedResponse = Gson().fromJson(cachedJson, SingleTaskResponse::class.java)
-                    val taskData = parsedResponse.result.task
+                if (!isSilent) {
+                    val cachedJson = cacheManager.readTaskDetail(taskId)
+                    if (cachedJson != null) {
+                        val parsedResponse = Gson().fromJson(cachedJson, SingleTaskResponse::class.java)
+                        val taskData = parsedResponse.result.task
 
-                    _selectedTask.value = taskData
-                    _statusText.value = "Brak sieci. Wczytano lokalną kopię."
-
-                    triggerChatFetch(taskData)
-                } else {
-                    _statusText.value = "Błąd: Brak internetu i brak lokalnej kopii zadania."
+                        _selectedTask.value = taskData
+                        _statusText.value = "Brak sieci. Wczytano lokalną kopię."
+                        triggerChatFetch(taskData)
+                    } else {
+                        _statusText.value = "Błąd: Brak internetu i brak lokalnej kopii zadania."
+                    }
                 }
             }
         }
@@ -1456,11 +1494,6 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-
-    fun toggleMode() {
-        _currentMode.value = if (_currentMode.value == "tasks") "groups" else "tasks"
-    }
-
     fun fetchData(isAuto: Boolean = false) {
         if (_isFetching.value) return
         _isFetching.value = true
@@ -1480,6 +1513,9 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
 
 
     private suspend fun bgFetchAllTasks(isAuto: Boolean) {
+        val cacheKey = getCacheKeyForFilter(_currentFilter.value)
+        loadListFromCache(cacheKey)
+
         when (_currentFilter.value) {
             "Wszystkie aktywne" -> fetchInProgressTasks(isAuto)
             "Wybrany użytkownik" -> {
@@ -1487,7 +1523,7 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
                 if (uid != null) {
                     fetchTasksForSpecificUser(uid)
                 } else {
-                    _statusText.value = "Wybierz najpierw użytkownika z listy."
+                    _statusText.value = "Wybierz najpierw użytkownika z bocznego menu."
                     _isFetching.value = false
                 }
             }
@@ -1495,12 +1531,11 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private suspend fun fetchTasksForSpecificUser(userId: String) {
+    private fun fetchTasksForSpecificUser(userId: String) {
         val cacheKey = "user_tasks_$userId"
         try {
             _statusText.value = "Lokalne wyszukiwanie zadań pracownika..."
 
-            // 1. Wczytujemy wszystkie pobrane do tej pory zadania z głównego pliku
             val allTasksJson = cacheManager.readTaskList("all_tasks")
 
             if (allTasksJson.isNullOrEmpty()) {
@@ -1509,11 +1544,9 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
                 return
             }
 
-            // 2. Dekodujemy JSON do listy obiektów
             val listType = object : TypeToken<List<BitrixTask>>() {}.type
             val allTasks: List<BitrixTask> = Gson().fromJson(allTasksJson, listType)
 
-            // 3. Filtrujemy listę według założeń: Twórca, Odpowiedzialny LUB Uczestnik
             val filteredTasks = allTasks.filter { task ->
                 task.creator?.id == userId ||
                         task.responsible?.id == userId ||
@@ -1521,9 +1554,8 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
             }.sortedByDescending { it.activity ?: "" }
 
             _statusText.value = "Znaleziono lokalnie ${filteredTasks.size} zadań."
-            _tasksList.value = filteredTasks // Tu nie odwracamy, bo allTasks jest już odwrócone przy pobieraniu
+            _tasksList.value = filteredTasks
 
-            // 4. Zapisujemy wynik do cache wybranego pracownika
             val finalJson = Gson().toJson(filteredTasks)
             cacheManager.saveTaskList(cacheKey, finalJson)
 
@@ -1547,7 +1579,6 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'00:00:00+01:00"))
 
             while (true) {
-                // Wywołanie API z dynamicznymi parametrami
                 val response = RetrofitClient.api.getTasks(
                     start = start,
                     realStatus = 3,
@@ -1587,17 +1618,23 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // ZMIEŃ TO w BitrixViewModel:
     private suspend fun fetchStandardTasks(isAuto: Boolean) {
-        val cacheKey = "all_tasks" // Klucz dla tego trybu
+        val cacheKey = "all_tasks"
         try {
-            _statusText.value = "Rozpoczynam pobieranie wszystkich zadań..."
+            if (!isAuto) _statusText.value = "Odświeżanie danych w tle..."
 
             val allTasks = mutableListOf<BitrixTask>()
             var start = 0
 
-            // Pętla pobierająca paczki po 50 elementów
+            // Filtrujemy zadania z ostatnich 7 dni dla odświeżania automatycznego
+            val dateStr = if (isAuto) {
+                LocalDateTime.now().minusDays(7).format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'00:00:00+01:00"))
+            } else null
+
             while (true) {
-                val response = RetrofitClient.api.getTasks(start = start)
+                // Uwaga: Zakładam że getTasks ma opcjonalny parametr activityDate
+                val response = RetrofitClient.api.getTasks(start = start, activityDate = dateStr)
                 val tasksBatch = response.result.tasks
 
                 if (tasksBatch.isEmpty()) {
@@ -1605,7 +1642,7 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 allTasks.addAll(tasksBatch)
-                _statusText.value = "Pobrano ${allTasks.size} zadań..."
+                if (!isAuto) _statusText.value = "Pobrano ${allTasks.size} zadań..."
 
                 val next = response.next
                 if (next != null) {
@@ -1615,45 +1652,40 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
 
-            // DODANO: Odwrócenie całej listy w miejscu (najnowsze trafiają na indeks 0)
-            allTasks.sortByDescending { it.activity ?: "" }
+            if (isAuto && _tasksList.value.isNotEmpty()) {
+                // TRYB AUTO: Łączymy nowe dane ze starą listą (nadpisujemy zmienione, dodajemy nowe)
+                val currentTasks = _tasksList.value.toMutableList()
+                val updatedMap = allTasks.associateBy { it.id }
 
-            val fetchedTasksStandard = Gson().toJson(allTasks)
-            cacheManager.saveJson(fetchedTasksStandard)
+                for (i in currentTasks.indices) {
+                    val id = currentTasks[i].id
+                    if (updatedMap.containsKey(id)) {
+                        currentTasks[i] = updatedMap[id]!!
+                    }
+                }
 
-            _statusText.value = "Pobrano wszystkie zadania!"
-            _tasksText.value = fetchedTasksStandard // Możesz usunąć budowanie StringBuildera!
-            // DODANO: Zapisujemy listę do stanu
-            _tasksList.value = allTasks
+                val existingIds = currentTasks.map { it.id }.toSet()
+                val newTasks = allTasks.filter { it.id !in existingIds }
+                currentTasks.addAll(newTasks)
 
-            // Budujemy tekst do wyświetlenia na ekranie dla celów testowych
-            val stringBuilder = StringBuilder()
-            stringBuilder.append("Łącznie pobrano: ${allTasks.size} zadań\n\n")
+                currentTasks.sortByDescending { it.activity ?: "" }
+                _tasksList.value = currentTasks
+            } else {
+                // TRYB RĘCZNY: Nadpisujemy wszystko i zapisujemy do pamięci podręczej
+                allTasks.sortByDescending { it.activity ?: "" }
+                _tasksList.value = allTasks
 
-            allTasks.forEach { task ->
-                // POPRAWIONO: Bezpieczna konwersja String na Int przed dzieleniem
-                val timeSpent = task.timeSpent?.div(60)
-
-                stringBuilder.append("ID: ${task.id} | ${task.title}\n")
-                stringBuilder.append("Status: ${task.status} | Deadline: ${task.deadline}\n")
-                stringBuilder.append("Czas: ${timeSpent} h\n")
-                stringBuilder.append("Aktywność: ${task.activity}\n")
-                stringBuilder.append("Utworzono: ${task.createdAt}\n")
-                stringBuilder.append("Odpowiedzialny: ${task.responsible}\n")
-                stringBuilder.append("----------------------------\n")
+                val finalJson = Gson().toJson(allTasks)
+                cacheManager.saveTaskList(cacheKey, finalJson)
+                _tasksText.value = finalJson
+                _statusText.value = "Pobrano wszystkie zadania!"
             }
 
-            _statusText.value = "Pobrano wszystkie zadania!"
-            _tasksText.value = stringBuilder.toString()
-
-            // Cache zapisze listę już w odwróconej, poprawnej kolejności
-            val finalJson = Gson().toJson(allTasks)
-            cacheManager.saveTaskList(cacheKey, finalJson)
-
         } catch (e: Exception) {
-            _statusText.value = "Brak sieci. Ładuję kopię lokalną..."
-            _tasksText.value = "Wyjątek: ${e.javaClass.simpleName}\nTreść: ${e.message}"
-            loadListFromCache(cacheKey)
+            if (!isAuto) {
+                _statusText.value = "Brak sieci. Ładuję kopię lokalną..."
+                loadListFromCache(cacheKey)
+            }
         } finally {
             _isFetching.value = false
         }

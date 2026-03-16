@@ -19,12 +19,6 @@ interface BitrixApi {
         @Query("filter[>=ACTIVITY_DATE]") activityDate: String? = null
     ): BitrixResponse
 
-//    @GET("tasks.task.list.json?start=1100")
-//    suspend fun getTasksRaw(): ResponseBody
-
-//    @GET("tasks.task.get")
-//    suspend fun getTaskDetails(@Query("taskId") taskId: String): SingleTaskResponse
-
     @GET("im.dialog.messages.get")
     suspend fun getChatMessages(
         @Query("DIALOG_ID") dialogId: String,
