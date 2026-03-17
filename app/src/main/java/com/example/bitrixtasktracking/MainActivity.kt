@@ -123,9 +123,8 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.unit.sp
+import java.time.temporal.ChronoUnit
 
-
-// ─── Nowe typy dla filtrów ───────────────────────────────────────────────────
 
 sealed class DateFilter {
     object All : DateFilter()
@@ -140,8 +139,6 @@ enum class StatusFilter(val label: String) {
     ACTIVE("Aktywne"),
     COMPLETED("Zakończone")
 }
-
-// ─── Pomocnicze ─────────────────────────────────────────────────────────────
 
 fun DateFilter.label(): String = when (this) {
     is DateFilter.All -> "Wszystkie daty"
@@ -169,7 +166,27 @@ fun matchesDateFilter(activity: String?, filter: DateFilter): Boolean {
     } catch (e: Exception) { false }
 }
 
-// ─── Data classes ────────────────────────────────────────────────────────────
+fun formatActivityAgo(activityDate: String?): String {
+    if (activityDate.isNullOrEmpty()) return "Brak aktywności"
+    return try {
+        val taskDate = ZonedDateTime.parse(activityDate)
+            .withZoneSameInstant(ZoneId.of("Europe/Warsaw"))
+            .toLocalDate()
+        val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
+
+        val daysBetween = ChronoUnit.DAYS.between(taskDate, today)
+
+        when {
+            daysBetween == 0L -> "Dzisiaj"
+            daysBetween == 1L -> "Wczoraj"
+            daysBetween > 1L -> "$daysBetween dni temu"
+            daysBetween < 0L -> "W przyszłości"
+            else -> "Brak danych"
+        }
+    } catch (e: Exception) {
+        "Nieznana data"
+    }
+}
 
 data class BitrixResponse(
     @SerializedName("result") val result: BitrixResult,
@@ -259,8 +276,6 @@ data class UserProfile(
     val photoUrl: String?
 )
 
-// ─── MainActivity ─────────────────────────────────────────────────────────────
-
 class MainActivity : ComponentActivity() {
 
     private val viewModel: BitrixViewModel by viewModels()
@@ -294,8 +309,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
-// ─── Pomocnicze funkcje ───────────────────────────────────────────────────────
 
 fun formatTimeSpentLive(seconds: Double?): String {
     if (seconds == null || seconds <= 0.0) return "00:00:00"
@@ -426,7 +439,56 @@ fun formatChatMessage(rawText: String?): AnnotatedString {
     }
 }
 
-// ─── Composables ─────────────────────────────────────────────────────────────
+@Composable
+fun formatDescriptionText(rawText: String): AnnotatedString {
+    val quoteRegex = Regex("(?s)\\[QUOTE\\](.*?)\\[/QUOTE\\]")
+    val nameRegex = Regex("(?s)\\[B\\](.*?)\\[/B\\]")
+
+    val quoteBackgroundColor = MaterialTheme.colorScheme.surfaceVariant
+    val quoteTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+    return buildAnnotatedString {
+        var lastIndex = 0
+        for (match in quoteRegex.findAll(rawText)) {
+            append(rawText.substring(lastIndex, match.range.first))
+
+            val rawQuoteContent = match.groupValues[1].trim()
+            val nameMatch = nameRegex.find(rawQuoteContent)
+
+            val currentText = toAnnotatedString().text
+            if (currentText.isNotEmpty() && !currentText.endsWith("\n")) {
+                append("\n")
+            }
+
+            withStyle(
+                SpanStyle(
+                    background = quoteBackgroundColor,
+                    color = quoteTextColor,
+                    fontStyle = FontStyle.Italic
+                )
+            ) {
+
+                if (nameMatch != null) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                        append(nameMatch.groupValues[1] + " ")
+                    }
+                    val remainingText = rawQuoteContent.removeRange(nameMatch.range).trim()
+                    if (remainingText.isNotEmpty()) {
+                        append("\n" + remainingText.replace("\n", "\n"))
+                    }
+                } else {
+                    append(rawQuoteContent.replace("\n", "\n"))
+                }
+                append(" ")
+            }
+
+            append("\n")
+            lastIndex = match.range.last + 1
+        }
+
+        append(rawText.substring(lastIndex).trimStart())
+    }
+}
 
 @Composable
 fun UserProfileRow(user: BitrixUser?, roleLabel: String) {
@@ -464,10 +526,13 @@ fun UserProfileRow(user: BitrixUser?, roleLabel: String) {
 fun ExpandableDescription(description: String, maxLinesCollapsed: Int = 7) {
     var isExpanded by remember { mutableStateOf(false) }
     var showReadMoreButton by remember { mutableStateOf(false) }
+    val formattedDescription = formatDescriptionText(description)
+
     Column(modifier = Modifier.fillMaxWidth().animateContentSize()) {
         Text(text = "Opis zadania:", style = MaterialTheme.typography.titleMedium)
         Text(
-            text = description, style = MaterialTheme.typography.bodyMedium,
+            text = formattedDescription,
+            style = MaterialTheme.typography.bodyMedium,
             maxLines = if (isExpanded) Int.MAX_VALUE else maxLinesCollapsed,
             overflow = TextOverflow.Ellipsis,
             onTextLayout = { if (it.hasVisualOverflow) showReadMoreButton = true },
@@ -477,8 +542,10 @@ fun ExpandableDescription(description: String, maxLinesCollapsed: Int = 7) {
             Text(
                 text = if (isExpanded) "Zwiń opis" else "Czytaj dalej...",
                 style = MaterialTheme.typography.labelMedium,
-                color = androidx.compose.ui.graphics.Color(0xFF1565C0),
-                modifier = Modifier.clickable { isExpanded = !isExpanded }.padding(top = 8.dp, bottom = 4.dp)
+                color = MaterialTheme.colorScheme.primary, // Zmiana koloru na systemowy
+                modifier = Modifier
+                    .clickable { isExpanded = !isExpanded }
+                    .padding(top = 8.dp, bottom = 4.dp)
             )
         }
     }
@@ -523,8 +590,6 @@ fun AccomplicesRow(accomplices: Map<String, BitrixUser>?) {
         }
     }
 }
-
-// ─── DatePicker dialogi ───────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -581,8 +646,6 @@ fun DateRangePickerDialog(
     }
 }
 
-// ─── Sekcja filtrów w szufladzie ──────────────────────────────────────────────
-
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun UserFilterSection(
@@ -616,7 +679,6 @@ fun UserFilterSection(
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
 
-        // ── Status ──────────────────────────────────────────────────────────
         Text(
             text = "STATUS ZADANIA",
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
@@ -638,7 +700,6 @@ fun UserFilterSection(
 
         Divider(modifier = Modifier.padding(vertical = 12.dp))
 
-        // ── Data aktywności ──────────────────────────────────────────────────
         Text(
             text = "DATA AKTYWNOŚCI",
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
@@ -723,8 +784,6 @@ fun UserFilterSection(
     }
 }
 
-// ─── MainScreen ───────────────────────────────────────────────────────────────
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
@@ -789,7 +848,6 @@ fun MainScreen(
                     if (currentFilter == "Wybrany użytkownik") {
                         Divider(modifier = Modifier.padding(vertical = 8.dp))
 
-                        // ── Wybór pracownika ─────────────────────────────────────
                         Text(
                             text = "Wybierz pracownika:",
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -829,7 +887,6 @@ fun MainScreen(
                             }
                         }
 
-                        // ── Filtry daty i statusu ────────────────────────────────
                         if (selectedUserId != null) {
                             Divider(modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
                             UserFilterSection(
@@ -913,8 +970,6 @@ fun MainScreen(
     }
 }
 
-// ─── TaskCard ─────────────────────────────────────────────────────────────────
-
 @Composable
 fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
     val (statusText, statusColor) = when (task.status) {
@@ -973,6 +1028,11 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(
+                text = "Aktywność: ${formatActivityAgo(task?.activity)}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
                 text = "Utworzono: ${if (task.createdAt.isNullOrEmpty()) "Brak danych" else formatBitrixDate(task.createdAt)}",
                 style = MaterialTheme.typography.bodySmall
             )
@@ -1005,7 +1065,6 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
     }
 }
 
-// ─── TimeTrackerSection ───────────────────────────────────────────────────────
 
 @Composable
 fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) {
@@ -1038,7 +1097,6 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
 
-            // ── Nagłówek z przyciskiem szczegółów ───────────────────────────
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1062,7 +1120,6 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
                     color = androidx.compose.ui.graphics.Color.Gray)
             } else {
 
-                // ── Wiersz per użytkownik (podsumowanie) ────────────────────
                 summaries.forEach { summary ->
                     val extra = liveExtras[summary.userName] ?: 0.0
                     val displayTotal = summary.totalSeconds + extra
@@ -1079,7 +1136,6 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // ── Suma całkowita ───────────────────────────────────────────
                 if (totalLiveAdditionalTime > 0) {
                     Text(
                         text = "Razem: ${formatTimeSpentLive(baseTaskTime)} + ${formatTimeSpentLive(totalLiveAdditionalTime)} = ${formatTimeSpentLive(grandTotal)}",
@@ -1094,7 +1150,6 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
                     )
                 }
 
-                // ── Szczegóły per dzień (rozwijane) ─────────────────────────
                 AnimatedVisibility(visible = showDetails) {
                     Column(modifier = Modifier.padding(top = 12.dp)) {
                         Divider(modifier = Modifier.padding(bottom = 10.dp))
@@ -1202,7 +1257,6 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
     }
 }
 
-// ─── TaskListWithFab ──────────────────────────────────────────────────────────
 
 @Composable
 fun TaskListWithFab(
@@ -1241,8 +1295,6 @@ fun TaskListWithFab(
     }
 }
 
-// ─── TaskDetailScreen ─────────────────────────────────────────────────────────
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TaskDetailScreen(
@@ -1269,11 +1321,29 @@ fun TaskDetailScreen(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val coroutineScope = rememberCoroutineScope()
 
-    val mappedStatusText = when (task?.status) {
-        1 -> "Nowe"; 2 -> "Oczekujące"; 3 -> "W trakcie"
-        4 -> "Do kontroli"; 5 -> "Zakończone"; 6 -> "Odłożone"
-        null -> "Brak danych"
-        else -> "Nieznany (${task?.status})"
+    val (mappedStatusText, statusColor) = when (task?.status) {
+        1 -> "Nowe" to androidx.compose.ui.graphics.Color(0xFF2196F3)
+        2 -> "Oczekujące" to androidx.compose.ui.graphics.Color(0xFFFF9800)
+        3 -> "W trakcie" to androidx.compose.ui.graphics.Color(0xFF4CAF50)
+        4 -> "Do kontroli" to androidx.compose.ui.graphics.Color(0xFF9C27B0)
+        5 -> "Zakończone" to androidx.compose.ui.graphics.Color(0xFF757575)
+        6 -> "Odłożone" to androidx.compose.ui.graphics.Color(0xFFF44336)
+        null -> "Brak danych" to androidx.compose.ui.graphics.Color.DarkGray
+        else -> "Nieznany (${task?.status})" to androidx.compose.ui.graphics.Color.DarkGray
+    }
+
+    val groupColor = remember(task?.groupId) {
+        if (task?.groupId.isNullOrEmpty() || task?.groupId == "0") {
+            androidx.compose.ui.graphics.Color.Unspecified
+        } else {
+            val colors = listOf(
+                0xFFE57373L, 0xFFF06292L, 0xFFBA68C8L, 0xFF9575CDL, 0xFF7986CBL,
+                0xFF64B5F6L, 0xFF4DD0E1L, 0xFF4DB6ACL, 0xFF81C784L, 0xFFAED581L,
+                0xFFFFD54FL, 0xFFFFB74DL, 0xFFFF8A65L, 0xFFA1887FL
+            )
+            val index = kotlin.math.abs(task!!.groupId.hashCode()) % colors.size
+            androidx.compose.ui.graphics.Color(colors[index])
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -1296,14 +1366,43 @@ fun TaskDetailScreen(
                 Spacer(modifier = Modifier.height(16.dp))
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (groupColor == androidx.compose.ui.graphics.Color.Unspecified)
+                            MaterialTheme.colorScheme.surfaceVariant
+                        else groupColor
+                    )
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(
+                        modifier = Modifier
+                            .padding(start = 6.dp) // Pasek koloru grupy po lewej stronie
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(16.dp)
+                    ) {
                         Text("ID: ${task?.id}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Status: $mappedStatusText", style = MaterialTheme.typography.bodyMedium)
+
+                        // Ostylowany status
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                            Text("Status: ", style = MaterialTheme.typography.bodyMedium)
+                            androidx.compose.material3.Surface(
+                                color = statusColor.copy(alpha = 0.15f),
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = mappedStatusText,
+                                    color = statusColor,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
                         Text("Czas pracy: ${formatTimeSpent(task?.timeSpent)}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Deadline: ${formatBitrixDate(task?.deadline)}", style = MaterialTheme.typography.bodyMedium)
                         Text("Utworzono: ${formatBitrixDate(task?.createdAt)}", style = MaterialTheme.typography.bodyMedium)
+                        Text("Deadline: ${formatBitrixDate(task?.deadline)}", style = MaterialTheme.typography.bodyMedium)
+
                         if (task?.status == 5 && !task?.closedDate.isNullOrEmpty()) {
                             Text(
                                 text = "Zakończono: ${formatBitrixDate(task!!.closedDate)}",
@@ -1470,8 +1569,6 @@ fun TaskDetailScreen(
     }
 }
 
-// ─── ViewModel ────────────────────────────────────────────────────────────────
-
 class BitrixViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _selectedTask = MutableStateFlow<BitrixTask?>(null)
@@ -1503,8 +1600,6 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _tasksList = MutableStateFlow<List<BitrixTask>>(emptyList())
     val tasksList: StateFlow<List<BitrixTask>> = _tasksList.asStateFlow()
-
-    // ── Nowe filtry ────────────────────────────────────────────────────────────
 
     private val _dateFilter = MutableStateFlow<DateFilter>(DateFilter.All)
     val dateFilter: StateFlow<DateFilter> = _dateFilter.asStateFlow()
