@@ -55,7 +55,6 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.FloatingActionButton
-
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bitrixtasktracking.network.RetrofitClient
@@ -86,7 +85,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.rememberCoroutineScope
-
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -124,6 +122,11 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.unit.sp
 import java.time.temporal.ChronoUnit
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Clear
 
 
 sealed class DateFilter {
@@ -138,54 +141,6 @@ enum class StatusFilter(val label: String) {
     ALL("Wszystkie"),
     ACTIVE("Aktywne"),
     COMPLETED("Zakończone")
-}
-
-fun DateFilter.label(): String = when (this) {
-    is DateFilter.All -> "Wszystkie daty"
-    is DateFilter.Today -> "Dzisiaj"
-    is DateFilter.Yesterday -> "Wczoraj"
-    is DateFilter.SingleDate -> "Data: ${date.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))}"
-    is DateFilter.DateRange -> "${from.format(DateTimeFormatter.ofPattern("dd.MM"))} – ${to.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))}"
-}
-
-fun matchesDateFilter(activity: String?, filter: DateFilter): Boolean {
-    if (filter is DateFilter.All) return true
-    if (activity.isNullOrEmpty()) return false
-    return try {
-        val taskDate = ZonedDateTime.parse(activity)
-            .withZoneSameInstant(ZoneId.of("Europe/Warsaw"))
-            .toLocalDate()
-        val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
-        when (filter) {
-            is DateFilter.Today -> taskDate == today
-            is DateFilter.Yesterday -> taskDate == today.minusDays(1)
-            is DateFilter.SingleDate -> taskDate == filter.date
-            is DateFilter.DateRange -> !taskDate.isBefore(filter.from) && !taskDate.isAfter(filter.to)
-            else -> true
-        }
-    } catch (e: Exception) { false }
-}
-
-fun formatActivityAgo(activityDate: String?): String {
-    if (activityDate.isNullOrEmpty()) return "Brak aktywności"
-    return try {
-        val taskDate = ZonedDateTime.parse(activityDate)
-            .withZoneSameInstant(ZoneId.of("Europe/Warsaw"))
-            .toLocalDate()
-        val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
-
-        val daysBetween = ChronoUnit.DAYS.between(taskDate, today)
-
-        when {
-            daysBetween == 0L -> "Dzisiaj"
-            daysBetween == 1L -> "Wczoraj"
-            daysBetween > 1L -> "$daysBetween dni temu"
-            daysBetween < 0L -> "W przyszłości"
-            else -> "Brak danych"
-        }
-    } catch (e: Exception) {
-        "Nieznana data"
-    }
 }
 
 data class BitrixResponse(
@@ -307,6 +262,54 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+}
+
+fun DateFilter.label(): String = when (this) {
+    is DateFilter.All -> "Wszystkie daty"
+    is DateFilter.Today -> "Dzisiaj"
+    is DateFilter.Yesterday -> "Wczoraj"
+    is DateFilter.SingleDate -> "Data: ${date.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))}"
+    is DateFilter.DateRange -> "${from.format(DateTimeFormatter.ofPattern("dd.MM"))} – ${to.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))}"
+}
+
+fun matchesDateFilter(activity: String?, filter: DateFilter): Boolean {
+    if (filter is DateFilter.All) return true
+    if (activity.isNullOrEmpty()) return false
+    return try {
+        val taskDate = ZonedDateTime.parse(activity)
+            .withZoneSameInstant(ZoneId.of("Europe/Warsaw"))
+            .toLocalDate()
+        val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
+        when (filter) {
+            is DateFilter.Today -> taskDate == today
+            is DateFilter.Yesterday -> taskDate == today.minusDays(1)
+            is DateFilter.SingleDate -> taskDate == filter.date
+            is DateFilter.DateRange -> !taskDate.isBefore(filter.from) && !taskDate.isAfter(filter.to)
+            else -> true
+        }
+    } catch (e: Exception) { false }
+}
+
+fun formatActivityAgo(activityDate: String?): String {
+    if (activityDate.isNullOrEmpty()) return "Brak aktywności"
+    return try {
+        val taskDate = ZonedDateTime.parse(activityDate)
+            .withZoneSameInstant(ZoneId.of("Europe/Warsaw"))
+            .toLocalDate()
+        val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
+
+        val daysBetween = ChronoUnit.DAYS.between(taskDate, today)
+
+        when {
+            daysBetween == 0L -> "Dzisiaj"
+            daysBetween == 1L -> "Wczoraj"
+            daysBetween > 1L -> "$daysBetween dni temu"
+            daysBetween < 0L -> "W przyszłości"
+            else -> "Brak danych"
+        }
+    } catch (e: Exception) {
+        "Nieznana data"
     }
 }
 
@@ -436,6 +439,53 @@ fun formatChatMessage(rawText: String?): AnnotatedString {
             lastIndex = match.range.last + 1
         }
         append(step1Text.substring(lastIndex))
+    }
+}
+
+@Composable
+fun ShimmerTaskCard() {
+    val infiniteTransition = rememberInfiniteTransition(label = "shimmer_transition")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.2f,
+        targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 800, easing = FastOutLinearInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "shimmer_alpha"
+    )
+
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(start = 6.dp)
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(16.dp)
+        ) {
+            Box(modifier = Modifier.fillMaxWidth(0.8f).height(24.dp).clip(RoundedCornerShape(4.dp))
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)))
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.width(60.dp).height(16.dp).clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)))
+                Spacer(modifier = Modifier.width(12.dp))
+                Box(modifier = Modifier.width(80.dp).height(24.dp).clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha * 0.4f)))
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Box(modifier = Modifier.fillMaxWidth(0.5f).height(14.dp).clip(RoundedCornerShape(4.dp))
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)))
+            Spacer(modifier = Modifier.height(8.dp))
+            Box(modifier = Modifier.fillMaxWidth(0.4f).height(14.dp).clip(RoundedCornerShape(4.dp))
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)))
+        }
     }
 }
 
@@ -805,6 +855,19 @@ fun MainScreen(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val coroutineScope = rememberCoroutineScope()
 
+    val searchQuery by viewModel.searchQuery.collectAsState()
+
+    // Lokalne filtrowanie listy zadań na podstawie wpisanej frazy
+    val filteredTasks = remember(tasksList, searchQuery) {
+        if (searchQuery.isBlank()) {
+            tasksList
+        } else {
+            tasksList.filter {
+                it.title?.contains(searchQuery, ignoreCase = true) == true
+            }
+        }
+    }
+
     LaunchedEffect(currentFilter) {
         while (true) {
             delay(60_000)
@@ -942,6 +1005,21 @@ fun MainScreen(
                         }
                     },
                     actions = {
+                        // Guzik "Wyczyść" widoczny wszędzie, poza "Wszystkie zadania"
+                        if (currentFilter != "Wszystkie zadania") {
+                            IconButton(
+                                onClick = {
+                                    // Resetowanie wszystkiego do wartości domyślnych (Wszystkie zadania)
+                                    viewModel.setFilter("Wszystkie zadania")
+                                    viewModel.setSearchQuery("") // Opcjonalnie: wyczyszczenie też pola wyszukiwarki
+                                },
+                                enabled = !isFetching
+                            ) {
+                                Icon(Icons.Default.Clear, contentDescription = "Wyczyść filtry")
+                            }
+                        }
+
+                        // Guzik "Odśwież" pozostaje bez zmian
                         IconButton(
                             onClick = { viewModel.fetchData(isAuto = false) },
                             enabled = !isFetching
@@ -956,15 +1034,52 @@ fun MainScreen(
                 modifier = modifier.fillMaxSize().padding(innerPadding),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (statusText.isNotBlank()) {
-                    Text(
-                        text = statusText,
-                        modifier = Modifier.padding(8.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = androidx.compose.ui.graphics.Color.Gray
+                if (isFetching) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
-                TaskListWithFab(tasksList = tasksList, navController = navController, viewModel = viewModel)
+
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { viewModel.setSearchQuery(it) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    placeholder = { Text("Szukaj zadania po nazwie...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Szukaj") },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Wyczyść wyszukiwanie")
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                if (filteredTasks.isEmpty() && isFetching) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                        userScrollEnabled = false
+                    ) {
+                        items(6) {
+                            ShimmerTaskCard()
+                        }
+                    }
+                } else if (filteredTasks.isEmpty() && !isFetching) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = if (searchQuery.isNotBlank()) "Brak zadań pasujących do: '$searchQuery'" else "Brak zadań do wyświetlenia.",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    TaskListWithFab(tasksList = filteredTasks, navController = navController, viewModel = viewModel)
+                }
             }
         }
     }
@@ -1612,6 +1727,13 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
     private val _timeSummaries = MutableStateFlow<List<UserTimeSummary>>(emptyList())
     val timeSummaries: StateFlow<List<UserTimeSummary>> = _timeSummaries.asStateFlow()
 
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
     init {
         loadAllUsers()
         fetchData()
@@ -1698,7 +1820,8 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
         _statusText.value = "Wysyłanie wiadomości..."
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val finalText = "Użytkownik Marek przekazuje: \n$text"
+                val finalText = "[B]Użytkownik Marek przekazuje:[/B] \n \n $text"
+                //val finalText = "[B]Użytkownik Sebastian Bierdzio przekazuje:[/B] \n \n $text"
                 val finalChat = "chat$chatId"
                 RetrofitClient.api.sendMessage(finalChat, finalText, "Y")
                 delay(1000)
