@@ -20,22 +20,6 @@ class JsonUtil (private val context: Context) {
         return if (file.exists()) file.readText() else null
     }
 
-    // Zapisuje surowy JSON, nadpisując stary plik
-    fun saveJson(jsonString: String) {
-        val file = File(context.filesDir, fileName)
-        file.writeText(jsonString)
-    }
-
-    // Odczytuje JSON, jeśli istnieje
-    fun readJson(): String? {
-        val file = File(context.filesDir, fileName)
-        return if (file.exists()) {
-            file.readText()
-        } else {
-            null
-        }
-    }
-
     fun saveTaskDetail(taskId: String, jsonString: String) {
         val file = File(detailsDir, "task_$taskId.json")
         file.writeText(jsonString)
@@ -46,11 +30,15 @@ class JsonUtil (private val context: Context) {
         return if (file.exists()) file.readText() else null
     }
 
-    fun saveChat(toString: String, finalJson: String) {
-        val file = File(detailsDir, "task_$toString.json")
-        file.writeText(finalJson)
+    fun readChat(chatId: String): String? {
+        val file = File(detailsDir, "chat_$chatId.json")
+        return if (file.exists()) file.readText() else null
     }
 
+    fun saveChat(chatId: String, finalJson: String) {
+        val file = File(detailsDir, "chat_$chatId.json") // Zmiana na "chat_"
+        file.writeText(finalJson)
+    }
     fun saveUsersList(jsonString: String) {
         val file = File(context.filesDir, "users_list.json")
         file.writeText(jsonString)

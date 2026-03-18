@@ -127,6 +127,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material3.DividerDefaults
+import androidx.compose.material3.HorizontalDivider
 
 
 sealed class DateFilter {
@@ -305,7 +307,7 @@ fun formatActivityAgo(activityDate: String?): String {
             daysBetween == 0L -> "Dzisiaj"
             daysBetween == 1L -> "Wczoraj"
             daysBetween > 1L -> "$daysBetween dni temu"
-            daysBetween < 0L -> "W przyszłości"
+            true -> "W przyszłości"
             else -> "Brak danych"
         }
     } catch (e: Exception) {
@@ -423,22 +425,90 @@ fun formatBitrixDate(dateString: String?): String {
 
 fun formatChatMessage(rawText: String?): AnnotatedString {
     if (rawText == null) return buildAnnotatedString { append("[Brak tekstu]") }
+
     val userRegex = Regex("\\[USER=\\d+\\](.*?)\\[/USER\\]", RegexOption.IGNORE_CASE)
-    val step1Text = rawText.replace(userRegex, "$1")
-    val quoteRegex = Regex("(?s)\\[QUOTE\\](.*?)\\[/QUOTE\\]")
+    val timestampRegex = Regex("\\[TIMESTAMP=(\\d+)\\s+FORMAT=([A-Z_]+)\\]", RegexOption.IGNORE_CASE)
+    val quoteRegex = Regex("(?s)\\[QUOTE\\](.*?)\\[/QUOTE\\]", RegexOption.IGNORE_CASE)
+    val urlRegex = Regex("\\[URL(?:=(.*?))?\\](.*?)\\[/URL\\]", RegexOption.IGNORE_CASE)
+
+    var step1Text = rawText.replace(userRegex, "$1")
+
+    val matchResults = timestampRegex.findAll(step1Text).toList()
+    for (match in matchResults) {
+        val ts = match.groupValues[1].toLongOrNull()
+        val formatType = match.groupValues[2]
+
+        if (ts != null) {
+            val date = Instant.ofEpochSecond(ts).atZone(ZoneId.of("Europe/Warsaw"))
+            val formattedDate = when (formatType) {
+                "LONG_DATE_FORMAT" -> date.format(DateTimeFormatter.ofPattern("dd.MM.yyyy", java.util.Locale("pl")))
+                "SHORT_DATE_FORMAT" -> date.format(DateTimeFormatter.ofPattern("HH:mm"))
+                else -> date.format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"))
+            }
+            step1Text = step1Text.replace(match.value, formattedDate)
+        }
+    }
+
     return buildAnnotatedString {
+
+        fun appendWithUrls(text: String, isItalic: Boolean = false) {
+            val combinedRegex = Regex(
+                """(?i)\[B](.*?)\[/B]|\[URL(?:=(.*?))?](.*?)\[/URL]""",
+                setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+            )
+            var lastIndex = 0
+            for (match in combinedRegex.findAll(text)) {
+                append(text.substring(lastIndex, match.range.first))
+
+                if (match.value.startsWith("[B", ignoreCase = true)) {
+                    withStyle(
+                        SpanStyle(
+                            fontWeight = FontWeight.Bold,
+                            fontStyle = if (isItalic) FontStyle.Italic else FontStyle.Normal
+                        )
+                    ) {
+                        append(match.groupValues[1])
+                    }
+                } else {
+                    val matchedUrl = match.groupValues[2]
+                    val linkText = match.groupValues[3]
+                    val finalUrl = matchedUrl.ifEmpty { linkText }
+
+                    val linkStyle = SpanStyle(
+                        color = androidx.compose.ui.graphics.Color(0xFF1E88E5),
+                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                        fontStyle = if (isItalic) FontStyle.Italic else FontStyle.Normal
+                    )
+                    pushLink(
+                        androidx.compose.ui.text.LinkAnnotation.Url(
+                            url = finalUrl,
+                            styles = androidx.compose.ui.text.TextLinkStyles(style = linkStyle)
+                        )
+                    )
+                    append(linkText)
+                    pop()
+                }
+                lastIndex = match.range.last + 1
+            }
+            append(text.substring(lastIndex))
+        }
+
         var lastIndex = 0
         for (match in quoteRegex.findAll(step1Text)) {
-            append(step1Text.substring(lastIndex, match.range.first))
+            appendWithUrls(step1Text.substring(lastIndex, match.range.first))
+
             val quoteContent = match.groupValues[1]
                 .replace("[B]", "", ignoreCase = true)
                 .replace("[/B]", "", ignoreCase = true).trim()
+
             withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic)) {
-                append(quoteContent)
+
+                appendWithUrls(quoteContent, isItalic = true)
             }
             lastIndex = match.range.last + 1
         }
-        append(step1Text.substring(lastIndex))
+
+        appendWithUrls(step1Text.substring(lastIndex))
     }
 }
 
@@ -739,7 +809,7 @@ fun UserFilterSection(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            StatusFilter.values().forEach { filter ->
+            StatusFilter.entries.forEach { filter ->
                 FilterChip(
                     selected = statusFilter == filter,
                     onClick = { onStatusFilterChange(filter) },
@@ -748,7 +818,11 @@ fun UserFilterSection(
             }
         }
 
-        Divider(modifier = Modifier.padding(vertical = 12.dp))
+        HorizontalDivider(
+            modifier = Modifier.padding(vertical = 12.dp),
+            thickness = DividerDefaults.Thickness,
+            color = DividerDefaults.color
+        )
 
         Text(
             text = "DATA AKTYWNOŚCI",
@@ -781,7 +855,6 @@ fun UserFilterSection(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Przyciski dla niestandardowych dat
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
                 selected = dateFilter is DateFilter.SingleDate,
@@ -891,7 +964,7 @@ fun MainScreen(
                         modifier = Modifier.padding(16.dp),
                         style = MaterialTheme.typography.titleLarge
                     )
-                    Divider()
+                    HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
                     Spacer(modifier = Modifier.height(8.dp))
 
                     filterOptions.forEach { option ->
@@ -909,7 +982,11 @@ fun MainScreen(
                     }
 
                     if (currentFilter == "Wybrany użytkownik") {
-                        Divider(modifier = Modifier.padding(vertical = 8.dp))
+                        HorizontalDivider(
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            thickness = DividerDefaults.Thickness,
+                            color = DividerDefaults.color
+                        )
 
                         Text(
                             text = "Wybierz pracownika:",
@@ -951,7 +1028,11 @@ fun MainScreen(
                         }
 
                         if (selectedUserId != null) {
-                            Divider(modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                            HorizontalDivider(
+                                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                                thickness = DividerDefaults.Thickness,
+                                color = DividerDefaults.color
+                            )
                             UserFilterSection(
                                 dateFilter = dateFilter,
                                 statusFilter = statusFilter,
@@ -1009,9 +1090,8 @@ fun MainScreen(
                         if (currentFilter != "Wszystkie zadania") {
                             IconButton(
                                 onClick = {
-                                    // Resetowanie wszystkiego do wartości domyślnych (Wszystkie zadania)
                                     viewModel.setFilter("Wszystkie zadania")
-                                    viewModel.setSearchQuery("") // Opcjonalnie: wyczyszczenie też pola wyszukiwarki
+                                    viewModel.setSearchQuery("")
                                 },
                                 enabled = !isFetching
                             ) {
@@ -1019,7 +1099,6 @@ fun MainScreen(
                             }
                         }
 
-                        // Guzik "Odśwież" pozostaje bez zmian
                         IconButton(
                             onClick = { viewModel.fetchData(isAuto = false) },
                             enabled = !isFetching
@@ -1069,7 +1148,7 @@ fun MainScreen(
                             ShimmerTaskCard()
                         }
                     }
-                } else if (filteredTasks.isEmpty() && !isFetching) {
+                } else if (filteredTasks.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             text = if (searchQuery.isNotBlank()) "Brak zadań pasujących do: '$searchQuery'" else "Brak zadań do wyświetlenia.",
@@ -1095,6 +1174,13 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
         5 -> "Zakończone" to androidx.compose.ui.graphics.Color(0xFF757575)
         6 -> "Odłożone" to androidx.compose.ui.graphics.Color(0xFFF44336)
         else -> "Nieznany (${task.status})" to androidx.compose.ui.graphics.Color.DarkGray
+    }
+
+    val activityText = formatActivityAgo(task.activity)
+    val activityColor = when (activityText) {
+        "Dzisiaj" -> androidx.compose.ui.graphics.Color(0xFF4CAF50) // Zielony
+        "Wczoraj" -> androidx.compose.ui.graphics.Color(0xFFFBC02D) // Ciemnożółty
+        else -> androidx.compose.ui.graphics.Color.Black // Czarny dla starszych dat
     }
 
     val groupColor = remember(task.groupId) {
@@ -1143,9 +1229,10 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Aktywność: ${formatActivityAgo(task?.activity)}",
+                text = "Aktywność: $activityText",
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                color = activityColor
             )
             Text(
                 text = "Utworzono: ${if (task.createdAt.isNullOrEmpty()) "Brak danych" else formatBitrixDate(task.createdAt)}",
@@ -1164,7 +1251,11 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Divider(thickness = 0.5.dp, color = androidx.compose.ui.graphics.Color.LightGray)
+            HorizontalDivider(
+                Modifier,
+                thickness = 0.5.dp,
+                color = androidx.compose.ui.graphics.Color.LightGray
+            )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "Zleceniodawca: ${task.creator?.name ?: "Nieznany"}",
@@ -1228,7 +1319,11 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
                 }
             }
 
-            Divider(modifier = Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 8.dp),
+                thickness = DividerDefaults.Thickness,
+                color = DividerDefaults.color
+            )
 
             if (summaries.isEmpty() && (baseTaskTime == null || baseTaskTime <= 0.0)) {
                 Text("Brak historii czasu.", style = MaterialTheme.typography.bodyMedium,
@@ -1267,12 +1362,15 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
 
                 AnimatedVisibility(visible = showDetails) {
                     Column(modifier = Modifier.padding(top = 12.dp)) {
-                        Divider(modifier = Modifier.padding(bottom = 10.dp))
+                        HorizontalDivider(
+                            modifier = Modifier.padding(bottom = 10.dp),
+                            thickness = DividerDefaults.Thickness,
+                            color = DividerDefaults.color
+                        )
 
                         summaries.forEach { summary ->
                             val extra = liveExtras[summary.userName] ?: 0.0
 
-                            // Zbieramy wszystkie dni z breakdownu + dziś jeśli aktywny
                             val allDays = summary.dailyBreakdown.toMutableMap()
                             if (summary.isActive && extra > 0) {
                                 allDays[today] = (allDays[today] ?: 0.0) + extra
@@ -1280,7 +1378,6 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
 
                             if (allDays.isEmpty()) return@forEach
 
-                            // Nagłówek użytkownika
                             Text(
                                 text = "👤 ${summary.userName}",
                                 style = MaterialTheme.typography.labelMedium,
@@ -1289,10 +1386,8 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
                                 modifier = Modifier.padding(bottom = 6.dp)
                             )
 
-                            // Sortujemy od najnowszego
                             val sortedDays = allDays.entries.sortedByDescending { it.key }
 
-                            // Zbieramy łączny czas tygodniami dla wizualnego podziału
                             sortedDays.forEach { (date, seconds) ->
                                 val isToday = date == today
                                 val isYesterday = date == today.minusDays(1)
@@ -1310,7 +1405,6 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        // Pasek wizualny proporcjonalny do czasu w dniu
                                         val maxDaySeconds = allDays.values.maxOrNull() ?: 1.0
                                         val barFraction = (seconds / maxDaySeconds).toFloat().coerceIn(0.05f, 1f)
                                         Box(
@@ -1342,10 +1436,10 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
                                 }
                             }
 
-                            // Suma dla użytkownika
                             val userTotalWithLive = summary.totalSeconds + extra
-                            Divider(
+                            HorizontalDivider(
                                 modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
+                                thickness = DividerDefaults.Thickness,
                                 color = androidx.compose.ui.graphics.Color.LightGray
                             )
                             Row(
@@ -1547,7 +1641,11 @@ fun TaskDetailScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                 }
                 if (chatMessages.isNotEmpty()) {
-                    Divider(modifier = Modifier.padding(vertical = 16.dp))
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 16.dp),
+                        thickness = DividerDefaults.Thickness,
+                        color = DividerDefaults.color
+                    )
                     Text(
                         text = "Czat zadania (${chatMessages.size} wiadomości)",
                         style = MaterialTheme.typography.titleMedium,
@@ -1707,7 +1805,7 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
     private val _currentMode = MutableStateFlow("tasks")
     val currentMode: StateFlow<String> = _currentMode.asStateFlow()
 
-    private val _currentFilter = MutableStateFlow("Pobieranie tasków")
+    private val _currentFilter = MutableStateFlow("Wszystkie zadania")
     val currentFilter: StateFlow<String> = _currentFilter.asStateFlow()
 
     private val _selectedUserId = MutableStateFlow<String?>(null)
@@ -1746,7 +1844,6 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setFilter(newFilter: String) {
         _currentFilter.value = newFilter
-        // Reset filtrów pomocniczych przy zmianie głównego trybu
         if (newFilter != "Wybrany użytkownik") {
             _dateFilter.value = DateFilter.All
             _statusFilter.value = StatusFilter.ALL
@@ -1821,15 +1918,44 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val finalText = "[B]Użytkownik Marek przekazuje:[/B] \n \n $text"
-                //val finalText = "[B]Użytkownik Sebastian Bierdzio przekazuje:[/B] \n \n $text"
                 val finalChat = "chat$chatId"
                 RetrofitClient.api.sendMessage(finalChat, finalText, "Y")
                 delay(1000)
                 _statusText.value = "Wiadomość wysłana!"
-                fetchTaskDetails(taskId)
+                refreshChat(chatId)
             } catch (e: Exception) {
                 _statusText.value = "Błąd wysyłania: ${e.message}"
             }
+        }
+    }
+
+    private suspend fun refreshChat(chatId: Int) {
+        val messages = mutableListOf<ChatMessage>()
+        var lastId: Int? = null
+        try {
+            while (true) {
+                val response = RetrofitClient.api.getChatMessages(
+                    dialogId = "chat$chatId",
+                    lastId = lastId
+                )
+                val fetched = response.result?.messages ?: emptyList()
+                if (fetched.isEmpty()) break
+
+                messages.addAll(fetched)
+                val validIds = fetched.mapNotNull { it.id }
+                if (validIds.isEmpty()) break
+
+                lastId = validIds.minOrNull()
+                delay(500)
+            }
+
+            if (messages.isNotEmpty()) {
+                cacheManager.saveChat(chatId.toString(), Gson().toJson(messages))
+                _chatMessages.value = messages
+                _timeSummaries.value = calculateTimeSummaries(messages)
+            }
+        } catch (e: Exception) {
+            _statusText.value = "Błąd odświeżania czatu: ${e.message}"
         }
     }
 
@@ -1873,6 +1999,20 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun bgFetchMessages(task: BitrixTask, chatId: Int) {
+        try {
+            val cachedChatJson = cacheManager.readChat(chatId.toString())
+
+            if (!cachedChatJson.isNullOrEmpty()) {
+                val listType = object : TypeToken<List<ChatMessage>>() {}.type
+                val cachedMessages: List<ChatMessage> = Gson().fromJson(cachedChatJson, listType)
+
+                _chatMessages.value = cachedMessages
+                _timeSummaries.value = calculateTimeSummaries(cachedMessages)
+            }
+        } catch (e: Exception) {
+            println("Błąd odczytu lokalnego czatu: ${e.message}")
+        }
+
         val messages = mutableListOf<ChatMessage>()
         var lastId: Int? = null
         try {
@@ -1880,20 +2020,24 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
                 val response = RetrofitClient.api.getChatMessages(dialogId = "chat$chatId", lastId = lastId)
                 val fetched = response.result?.messages ?: emptyList()
                 if (fetched.isEmpty()) break
+
                 messages.addAll(fetched)
                 val validIds = fetched.mapNotNull { it.id }
                 if (validIds.isEmpty()) break
+
                 lastId = validIds.minOrNull()
                 delay(500)
             }
+
             if (messages.isNotEmpty()) {
                 cacheManager.saveChat(chatId.toString(), Gson().toJson(messages))
                 _chatMessages.value = messages
                 _timeSummaries.value = calculateTimeSummaries(messages)
             }
-        } catch (e: Exception) { println("Błąd pobierania wiadomości: ${e.message}") }
+        } catch (e: Exception) {
+            println("Błąd pobierania wiadomości z sieci: ${e.message}")
+        }
     }
-
     fun fetchData(isAuto: Boolean = false) {
         if (_isFetching.value) return
         _isFetching.value = true
@@ -2043,6 +2187,11 @@ class BitrixViewModel(application: Application) : AndroidViewModel(application) 
                 currentTasks.addAll(allTasks.filter { it.id !in existingIds })
                 currentTasks.sortByDescending { it.activity ?: "" }
                 _tasksList.value = currentTasks
+
+                val finalJson = Gson().toJson(currentTasks)
+                cacheManager.saveTaskList(cacheKey, finalJson)
+                _tasksText.value = finalJson
+
             } else {
                 allTasks.sortByDescending { it.activity ?: "" }
                 _tasksList.value = allTasks
