@@ -1178,9 +1178,9 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
 
     val activityText = formatActivityAgo(task.activity)
     val activityColor = when (activityText) {
-        "Dzisiaj" -> androidx.compose.ui.graphics.Color(0xFF4CAF50) // Zielony
-        "Wczoraj" -> androidx.compose.ui.graphics.Color(0xFFFBC02D) // Ciemnożółty
-        else -> androidx.compose.ui.graphics.Color.Black // Czarny dla starszych dat
+        "Dzisiaj" -> androidx.compose.ui.graphics.Color(0xFF4CAF50) // Zielony może zostać
+        "Wczoraj" -> androidx.compose.ui.graphics.Color(0xFFFBC02D) // Żółty może zostać
+        else -> MaterialTheme.colorScheme.onSurface // Zamiast Color.Black
     }
 
     val groupColor = remember(task.groupId) {
@@ -1203,8 +1203,11 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
         colors = CardDefaults.cardColors(containerColor = groupColor)
     ) {
         Column(
-            modifier = Modifier.padding(start = 6.dp).fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface).padding(16.dp)
+            modifier = Modifier
+                .padding(start = 6.dp)
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(16.dp)
         ) {
             Text(text = task.title ?: "Brak tytułu", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(12.dp))
@@ -1260,12 +1263,12 @@ fun TaskCard(task: BitrixTask, onClick: () -> Unit) {
             Text(
                 text = "Zleceniodawca: ${task.creator?.name ?: "Nieznany"}",
                 style = MaterialTheme.typography.bodySmall,
-                color = androidx.compose.ui.graphics.Color.DarkGray
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
                 text = "Odpowiedzialny: ${task.responsible?.name ?: "Nieznany"}",
                 style = MaterialTheme.typography.bodySmall,
-                color = androidx.compose.ui.graphics.Color.DarkGray
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -1299,7 +1302,7 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
     Card(
         modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color(0xFFE3F2FD))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
 
@@ -1327,7 +1330,7 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
 
             if (summaries.isEmpty() && (baseTaskTime == null || baseTaskTime <= 0.0)) {
                 Text("Brak historii czasu.", style = MaterialTheme.typography.bodyMedium,
-                    color = androidx.compose.ui.graphics.Color.Gray)
+                    color = MaterialTheme.colorScheme.onSecondaryContainer)
             } else {
 
                 summaries.forEach { summary ->
@@ -1351,7 +1354,7 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
                         text = "Razem: ${formatTimeSpentLive(baseTaskTime)} + ${formatTimeSpentLive(totalLiveAdditionalTime)} = ${formatTimeSpentLive(grandTotal)}",
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold,
-                        color = androidx.compose.ui.graphics.Color(0xFF1565C0)
+                        color = MaterialTheme.colorScheme.primary
                     )
                 } else {
                     Text(
@@ -1422,7 +1425,7 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
                                             text = dateLabel,
                                             style = MaterialTheme.typography.bodySmall,
                                             color = if (isToday) MaterialTheme.colorScheme.primary
-                                            else androidx.compose.ui.graphics.Color.DarkGray,
+                                            else MaterialTheme.colorScheme.onSecondaryContainer,
                                             fontWeight = if (isToday) FontWeight.SemiBold else FontWeight.Normal
                                         )
                                     }
@@ -1431,7 +1434,7 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
                                         style = MaterialTheme.typography.bodySmall,
                                         fontWeight = FontWeight.SemiBold,
                                         color = if (isToday) MaterialTheme.colorScheme.primary
-                                        else androidx.compose.ui.graphics.Color.DarkGray
+                                        else MaterialTheme.colorScheme.onSecondaryContainer
                                     )
                                 }
                             }
@@ -1449,13 +1452,13 @@ fun TimeTrackerSection(summaries: List<UserTimeSummary>, baseTaskTime: Double?) 
                                 Text(
                                     text = "Suma",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = androidx.compose.ui.graphics.Color.Gray
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
                                 Text(
                                     text = formatTimeSpent(userTotalWithLive),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = androidx.compose.ui.graphics.Color.Gray
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
                             }
                         }
@@ -1586,7 +1589,7 @@ fun TaskDetailScreen(
                         modifier = Modifier
                             .padding(start = 6.dp) // Pasek koloru grupy po lewej stronie
                             .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surface)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
                             .padding(16.dp)
                     ) {
                         Text("ID: ${task?.id}", style = MaterialTheme.typography.bodyMedium)
@@ -1661,8 +1664,8 @@ fun TaskDetailScreen(
                         Card(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                             colors = CardDefaults.cardColors(
-                                containerColor = if (isSystem) androidx.compose.ui.graphics.Color(0xFFFFF9C4)
-                                else androidx.compose.ui.graphics.Color(0xFFF0F0F0)
+                                containerColor = if (isSystem) MaterialTheme.colorScheme.tertiaryContainer
+                                else MaterialTheme.colorScheme.surfaceVariant
                             )
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
@@ -1693,14 +1696,14 @@ fun TaskDetailScreen(
                                         Text(
                                             text = authorName,
                                             style = MaterialTheme.typography.labelMedium,
-                                            color = if (isSystem) androidx.compose.ui.graphics.Color.DarkGray
-                                            else androidx.compose.ui.graphics.Color.Black
+                                            color = if (isSystem) MaterialTheme.colorScheme.onTertiaryContainer
+                                            else MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                     Text(
                                         text = messageDate,
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = androidx.compose.ui.graphics.Color.Gray
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))

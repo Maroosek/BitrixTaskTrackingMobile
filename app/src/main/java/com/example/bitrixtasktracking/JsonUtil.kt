@@ -36,7 +36,7 @@ class JsonUtil (private val context: Context) {
     }
 
     fun saveChat(chatId: String, finalJson: String) {
-        val file = File(detailsDir, "chat_$chatId.json") // Zmiana na "chat_"
+        val file = File(detailsDir, "chat_$chatId.json")
         file.writeText(finalJson)
     }
     fun saveUsersList(jsonString: String) {
